@@ -193,6 +193,7 @@
   }
   .modal-chip.red { background: rgba(252,129,129,0.15); color: #fc8181; }
   .modal-chip.green { background: rgba(97,221,117,0.15); color: #61DD75; }
+  .modal-chip.yellow { background: rgba(236,201,75,0.15); color: #ecc94b; }
   .kpi.clickable { cursor: pointer; }
   .kpi.clickable:hover { border-color: #61DD75; box-shadow: 0 0 0 1px rgba(97,221,117,0.2); }
 
@@ -974,11 +975,15 @@ function buildKPIs(data) {
   const lastMonthKpi = last3[last3.length - 1];
   const last3Data = raw.filter(d => last3.includes(d.mes) && !excluded.has(d.nome));
   const last3Names = [...new Set(last3Data.map(d => d.nome))];
+  const last2Kpi = last3.slice(-2);
   const below80_3m = last3Names.filter(nome => {
     const entries = last3Data.filter(d => d.nome === nome);
-    // Exige dado no último mês e pelo menos 2 meses abaixo de 80%
-    return entries.find(d => d.mes === lastMonthKpi) &&
-           entries.filter(d => d.perc < 80).length >= 2;
+    if (!entries.find(d => d.mes === lastMonthKpi)) return false;
+    // 3 meses consecutivos abaixo de 80%
+    const all3 = last3.every(m => { const e = entries.find(d => d.mes === m); return e && e.perc < 80; });
+    // últimos 2 meses consecutivos abaixo de 80%
+    const last2ok = last2Kpi.every(m => { const e = entries.find(d => d.mes === m); return e && e.perc < 80; });
+    return all3 || last2ok;
   }).length;
   const above100_3m = last3Names.filter(nome => {
     const entries = last3Data.filter(d => d.nome === nome);
@@ -1354,11 +1359,15 @@ function openKpiModal(type) {
   let matched, listHtml;
 
   if (isBelow) {
+    const last2 = last3.slice(-2); // dois meses mais recentes
+    // grupo 3: todos os 3 últimos meses abaixo de 80%
     const group3 = allPeople
-      .filter(p => p.entries.filter(d => d.perc < 80).length === 3)
+      .filter(p => last3.every(m => { const e = p.entries.find(d => d.mes === m); return e && e.perc < 80; }))
       .sort((a,b) => a.entries.reduce((s,d)=>s+d.perc,0)/a.entries.length - b.entries.reduce((s,d)=>s+d.perc,0)/b.entries.length);
+    const group3Names = new Set(group3.map(p => p.nome));
+    // grupo 2: ÚLTIMOS 2 meses consecutivos abaixo de 80%, mas não os 3
     const group2 = allPeople
-      .filter(p => p.entries.filter(d => d.perc < 80).length === 2)
+      .filter(p => !group3Names.has(p.nome) && last2.every(m => { const e = p.entries.find(d => d.mes === m); return e && e.perc < 80; }))
       .sort((a,b) => a.entries.reduce((s,d)=>s+d.perc,0)/a.entries.length - b.entries.reduce((s,d)=>s+d.perc,0)/b.entries.length);
     matched = [...group3, ...group2];
     const sectionStyle = 'font-size:0.72rem;color:#aaa;margin:12px 0 6px;text-transform:uppercase;letter-spacing:0.05em;';
