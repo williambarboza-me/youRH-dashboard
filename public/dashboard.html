@@ -976,8 +976,9 @@ function buildKPIs(data) {
   const last3Names = [...new Set(last3Data.map(d => d.nome))];
   const below80_3m = last3Names.filter(nome => {
     const entries = last3Data.filter(d => d.nome === nome);
-    // Exige dado no último mês (ativo) e pelo menos 2 meses todos abaixo de 80%
-    return entries.find(d => d.mes === lastMonthKpi) && entries.length >= 2 && entries.every(d => d.perc < 80);
+    // Exige dado no último mês e pelo menos 2 meses abaixo de 80%
+    return entries.find(d => d.mes === lastMonthKpi) &&
+           entries.filter(d => d.perc < 80).length >= 2;
   }).length;
   const above100_3m = last3Names.filter(nome => {
     const entries = last3Data.filter(d => d.nome === nome);
@@ -1012,7 +1013,7 @@ function buildKPIs(data) {
       <div class="kpi-sub">${activeMes} mês${activeMes!==1?'es':''} no período</div>
     </div>
     <div class="kpi clickable" onclick="openKpiModal('below80')">
-      <div class="kpi-label">⚠️ Abaixo de 80% — últ. 3 meses</div>
+      <div class="kpi-label">⚠️ Abaixo de 80% — últ. 2 meses</div>
       <div class="kpi-value ${below80_3m>0?'red':'green'}">${below80_3m}</div>
       <div class="kpi-sub">colaborador${below80_3m!==1?'es':''} em risco contínuo</div>
     </div>
@@ -1327,34 +1328,9 @@ function openKpiModal(type) {
   const names = [...new Set(last3Data.map(d => d.nome))];
 
   const isBelow = type === 'below80';
-  const matched = names
-    .map(nome => {
-      const entries = last3Data.filter(d => d.nome === nome);
-      return { nome, setor: entries[0].setor, entries };
-    })
-    .filter(p => {
-      // Exige dado no último mês (colaborador ativo no período)
-      if (!p.entries.find(d => d.mes === lastMonth)) return false;
-      if (p.entries.length < 2) return false;
-      return isBelow
-        ? p.entries.every(d => d.perc < 80)
-        : p.entries.every(d => d.perc >= 100);
-    })
-    .sort((a,b) => {
-      const avgA = a.entries.reduce((s,d)=>s+d.perc,0)/a.entries.length;
-      const avgB = b.entries.reduce((s,d)=>s+d.perc,0)/b.entries.length;
-      return isBelow ? avgA - avgB : avgB - avgA;
-    });
 
-  const accent = isBelow ? '#fc8181' : '#61DD75';
-  document.getElementById('modalBox').style.setProperty('--modal-accent', accent);
-  document.getElementById('modalTitle').textContent = isBelow
-    ? '⚠️ Abaixo de 80% — últimos 3 meses'
-    : '🏆 Acima de 100% — últimos 3 meses';
-  document.getElementById('modalCount').textContent =
-    `${matched.length} colaborador${matched.length!==1?'es':''} · ${last3.join(', ')}`;
-
-  document.getElementById('modalList').innerHTML = matched.map(p => {
+  // Para below80: dividir em 3 meses e 2 de 3 meses
+  function buildModalItem(p) {
     const chips = last3.map(m => {
       const entry = p.entries.find(d => d.mes === m);
       if (!entry) return `<span class="modal-chip" style="opacity:0.3">—</span>`;
@@ -1366,7 +1342,50 @@ function openKpiModal(type) {
       <span class="modal-item-sector">${p.setor}</span>
       <span class="modal-item-months">${chips}</span>
     </div>`;
-  }).join('');
+  }
+
+  const allPeople = names
+    .map(nome => {
+      const entries = last3Data.filter(d => d.nome === nome);
+      return { nome, setor: entries[0].setor, entries };
+    })
+    .filter(p => p.entries.find(d => d.mes === lastMonth) && p.entries.length >= 2);
+
+  let matched, listHtml;
+
+  if (isBelow) {
+    const group3 = allPeople
+      .filter(p => p.entries.filter(d => d.perc < 80).length === 3)
+      .sort((a,b) => a.entries.reduce((s,d)=>s+d.perc,0)/a.entries.length - b.entries.reduce((s,d)=>s+d.perc,0)/b.entries.length);
+    const group2 = allPeople
+      .filter(p => p.entries.filter(d => d.perc < 80).length === 2)
+      .sort((a,b) => a.entries.reduce((s,d)=>s+d.perc,0)/a.entries.length - b.entries.reduce((s,d)=>s+d.perc,0)/b.entries.length);
+    matched = [...group3, ...group2];
+    const sectionStyle = 'font-size:0.72rem;color:#aaa;margin:12px 0 6px;text-transform:uppercase;letter-spacing:0.05em;';
+    listHtml = '';
+    if (group3.length) {
+      listHtml += `<div style="${sectionStyle}">3 meses abaixo de 80% (${group3.length})</div>` + group3.map(buildModalItem).join('');
+    }
+    if (group2.length) {
+      listHtml += `<div style="${sectionStyle}${group3.length?'margin-top:18px;':''}">2 de 3 meses abaixo de 80% (${group2.length})</div>` + group2.map(buildModalItem).join('');
+    }
+    if (!matched.length) listHtml = '<p style="color:#61DD75;padding:16px">✓ Nenhum colaborador nesta situação.</p>';
+  } else {
+    matched = allPeople
+      .filter(p => p.entries.every(d => d.perc >= 100))
+      .sort((a,b) => b.entries.reduce((s,d)=>s+d.perc,0)/b.entries.length - a.entries.reduce((s,d)=>s+d.perc,0)/a.entries.length);
+    listHtml = matched.map(buildModalItem).join('');
+  }
+
+  const accent = isBelow ? '#fc8181' : '#61DD75';
+  document.getElementById('modalBox').style.setProperty('--modal-accent', accent);
+  document.getElementById('modalTitle').textContent = isBelow
+    ? '⚠️ Abaixo de 80% — últimos 2 e 3 meses'
+    : '🏆 Acima de 100% — últimos 3 meses';
+  document.getElementById('modalCount').textContent =
+    `${matched.length} colaborador${matched.length!==1?'es':''} · ${last3.join(', ')}`;
+
+  document.getElementById('modalList').innerHTML = listHtml;
 
   document.getElementById('kpiModal').classList.add('open');
 }
