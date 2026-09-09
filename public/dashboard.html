@@ -490,23 +490,13 @@
   </div>
 
 
-  <!-- ─── PREVIEW: LINHA ──────────────────────────────────────────────────── -->
-  <div class="section-title"><span>📈 Prévia — Evolução Mensal em Linha</span></div>
-  <p class="chart-preview-note">Preview — avise se quiser substituir o gráfico de barras ou manter os dois.</p>
-  <div class="charts-row charts-row-2">
+  <!-- ─── EVOLUÇÃO MENSAL + MATRIZ ─────────────────────────────────────────── -->
+  <div class="section-title"><span>📈 Evolução Mensal &amp; Análise Estratégica</span></div>
+  <div class="charts-row charts-row-2" style="margin-bottom:20px">
     <div class="chart-card">
       <h3>Média de Produtividade Mês a Mês — Linha</h3>
       <canvas id="chartLinePreview"></canvas>
     </div>
-    <div class="chart-card">
-      <h3>Média por Setor — Linha (Período Selecionado)</h3>
-      <canvas id="chartSectorLine"></canvas>
-    </div>
-  </div>
-
-  <!-- ─── ANÁLISE ESTRATÉGICA ───────────────────────────────────────────────── -->
-  <div class="section-title">📊 Análise Estratégica</div>
-  <div class="charts-row charts-row-2" style="margin-bottom:20px">
     <div class="chart-card" style="position:relative">
       <h3>Matriz de Setores — Performance × Consistência</h3>
       <p class="note">Bolha proporcional ao headcount · ↑ = melhor performance · → = mais consistente</p>
@@ -516,11 +506,13 @@
       <div style="position:absolute;bottom:20px;left:18px;font-size:9px;font-weight:700;letter-spacing:1.2px;color:rgba(56,189,248,.4)">POTENCIAL</div>
       <canvas id="chartMatriz"></canvas>
     </div>
-    <div class="chart-card">
-      <h3>📈 Projeção Preditiva por Setor</h3>
-      <p class="note">Linha sólida = realizado · Tracejado = próximo mês (regressão linear)</p>
-      <canvas id="chartProjecao"></canvas>
-    </div>
+  </div>
+
+  <!-- ─── PROJEÇÃO PREDITIVA (FULL WIDTH) ───────────────────────────────────── -->
+  <div class="chart-card" style="margin-bottom:20px">
+    <h3>📈 Projeção Preditiva por Setor</h3>
+    <p class="note">Linha sólida = realizado · Tracejado = próximo mês (regressão linear)</p>
+    <canvas id="chartProjecao" height="140"></canvas>
   </div>
 
   <!-- ─── TENDÊNCIAS ────────────────────────────────────────────────────────── -->
@@ -686,7 +678,7 @@
 </div>
 
 <script>
-// ─── DATA ─────────────────────────────────────────────── build:2026-09-09b ──
+// ─── DATA ─────────────────────────────────────────────── build:2026-09-09c ──
 const raw = (window.__YOURH_DATA__ || []);
 
 // ─── AUTH GUARD + USER INFO ───────────────────────────────────────────────────
@@ -1517,7 +1509,6 @@ function render() {
   buildChartTop10(data);
   buildChartDist(data);
   buildChartLinePreview();
-  buildChartSectorLine(data);
   buildMatrizSetores(data);
   buildProjecaoPreditiva();
   buildTendencias(data);
