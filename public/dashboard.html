@@ -141,8 +141,10 @@
 
   .chart-preview-note { font-size: 0.75rem; color: #6b6b6b; margin: -10px 0 16px; }
 
+  .tendencias-grid { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
   @media (max-width: 900px) {
     .charts-row-2, .charts-row-3, .collab-body { grid-template-columns: 1fr; }
+    .tendencias-grid { grid-template-columns: 1fr; }
     .container { padding: 16px; }
     header { padding: 16px; }
     .filters { padding: 12px 16px; }
@@ -502,6 +504,29 @@
     </div>
   </div>
 
+  <!-- ─── ANÁLISE ESTRATÉGICA ───────────────────────────────────────────────── -->
+  <div class="section-title">📊 Análise Estratégica</div>
+  <div class="charts-row charts-row-2" style="margin-bottom:20px">
+    <div class="chart-card" style="position:relative">
+      <h3>Matriz de Setores — Performance × Consistência</h3>
+      <p class="note">Bolha proporcional ao headcount · ↑ = melhor performance · → = mais consistente</p>
+      <div style="position:absolute;top:70px;right:18px;font-size:9px;font-weight:700;letter-spacing:1.2px;color:rgba(97,221,117,.4)">ESTRELAS</div>
+      <div style="position:absolute;top:70px;left:18px;font-size:9px;font-weight:700;letter-spacing:1.2px;color:rgba(252,129,129,.4)">RISCO</div>
+      <div style="position:absolute;bottom:20px;right:18px;font-size:9px;font-weight:700;letter-spacing:1.2px;color:rgba(236,201,75,.4)">SÓLIDOS</div>
+      <div style="position:absolute;bottom:20px;left:18px;font-size:9px;font-weight:700;letter-spacing:1.2px;color:rgba(56,189,248,.4)">POTENCIAL</div>
+      <canvas id="chartMatriz"></canvas>
+    </div>
+    <div class="chart-card">
+      <h3>📈 Projeção Preditiva por Setor</h3>
+      <p class="note">Linha sólida = realizado · Tracejado = próximo mês (regressão linear)</p>
+      <canvas id="chartProjecao"></canvas>
+    </div>
+  </div>
+
+  <!-- ─── TENDÊNCIAS ────────────────────────────────────────────────────────── -->
+  <div class="section-title">💡 Tendências &amp; Insights</div>
+  <div id="tendencias-wrap" style="margin-bottom:20px"></div>
+
 </section>
 
 <section id="sec-colaboradores" class="page-section">
@@ -661,7 +686,7 @@
 </div>
 
 <script>
-// ─── DATA ──────────────────────────────────────────────── build:2026-09-09 ──
+// ─── DATA ─────────────────────────────────────────────── build:2026-09-09b ──
 const raw = (window.__YOURH_DATA__ || []);
 
 // ─── AUTH GUARD + USER INFO ───────────────────────────────────────────────────
@@ -756,6 +781,7 @@ const MONTHS = MONTHS_ORDER.filter(m => raw.some(d => d.mes === m));
 
 // ─── HELPERS ─────────────────────────────────────────────────────────────────
 function avg(arr) { return arr.length ? arr.reduce((a,b)=>a+b,0)/arr.length : 0; }
+function stdev(arr) { if(arr.length<2) return 0; const m=avg(arr); return Math.sqrt(arr.reduce((s,v)=>s+(v-m)**2,0)/arr.length); }
 
 function percColor(p) {
   if (p >= 100) return '#61DD75';
@@ -1267,6 +1293,220 @@ function renderTable() {
   }
 }
 
+// ─── CHART: MATRIZ DE SETORES ────────────────────────────────────────────────
+let chartMatriz;
+function buildMatrizSetores(data) {
+  const activeNames = isActiveFilterOn() ? getActiveNames() : null;
+  const filtered = raw.filter(d => !excluded.has(d.nome) && (!activeNames || activeNames.has(d.nome)));
+
+  // Per sector: monthly avgs → consistency (100−stdev), avg performance, headcount
+  const secMap = {};
+  filtered.forEach(d => {
+    if (!secMap[d.setor]) secMap[d.setor] = { monthBuckets: {}, names: new Set() };
+    if (!secMap[d.setor].monthBuckets[d.mes]) secMap[d.setor].monthBuckets[d.mes] = [];
+    secMap[d.setor].monthBuckets[d.mes].push(d.perc);
+    secMap[d.setor].names.add(d.nome);
+  });
+
+  const datasets = Object.entries(secMap).map(([setor, info]) => {
+    const mAvgs = Object.values(info.monthBuckets).map(arr => avg(arr));
+    const avgPerf = avg(mAvgs);
+    const consistency = 100 - stdev(mAvgs);
+    const hc = info.names.size;
+    const color = SECTOR_COLORS[setor] || '#9a9a9a';
+    return {
+      label: setor,
+      data: [{ x: +consistency.toFixed(2), y: +avgPerf.toFixed(2), r: Math.max(7, Math.sqrt(hc) * 7.5) }],
+      backgroundColor: color + '33',
+      borderColor: color,
+      borderWidth: 1.5,
+    };
+  });
+
+  destroyChart(chartMatriz);
+  chartMatriz = new Chart(document.getElementById('chartMatriz'), {
+    type: 'bubble',
+    data: { datasets },
+    options: {
+      responsive: true,
+      plugins: {
+        legend: { display: false },
+        datalabels: {
+          display: true,
+          formatter: (_, ctx) => ctx.dataset.label,
+          color: ctx => ctx.dataset.borderColor,
+          font: { size: 10, weight: '700' },
+          anchor: 'center', align: 'top', offset: 5,
+        },
+        tooltip: {
+          callbacks: {
+            label: ctx => {
+              const d = ctx.raw;
+              return [`${ctx.dataset.label}`, `Perf média: ${d.y.toFixed(1)}%`, `Consistência: ${d.x.toFixed(1)}`];
+            }
+          }
+        }
+      },
+      scales: {
+        x: {
+          title: { display: true, text: '← Variável  |  Consistente →', color: tickColor, font: { size: 10 } },
+          ticks: { color: tickColor }, grid: { color: gridColor },
+          min: 78, max: 106,
+        },
+        y: {
+          title: { display: true, text: '↑ Performance', color: tickColor, font: { size: 10 } },
+          ticks: { color: tickColor, callback: v => v + '%' }, grid: { color: gridColor },
+          min: 40, max: 140,
+        }
+      }
+    }
+  });
+}
+
+// ─── CHART: PROJEÇÃO PREDITIVA ────────────────────────────────────────────────
+let chartProjecao;
+function buildProjecaoPreditiva() {
+  const activeNames = isActiveFilterOn() ? getActiveNames() : null;
+  const filtered = raw.filter(d => !excluded.has(d.nome) && (!activeNames || activeNames.has(d.nome)));
+  const sectors = [...new Set(raw.filter(d => !excluded.has(d.nome)).map(d => d.setor))].sort();
+
+  const MONTHS_ORDER = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+  const lastIdx = MONTHS_ORDER.indexOf(MONTHS[MONTHS.length - 1]);
+  const nextLabel = lastIdx >= 0 && lastIdx < 11 ? MONTHS_ORDER[lastIdx + 1].slice(0, 3) + ' ᵖ' : 'Próx.';
+  const labels = [...MONTHS.map(m => m.slice(0, 3)), nextLabel];
+
+  const datasets = [];
+  sectors.forEach(setor => {
+    const sData = filtered.filter(d => d.setor === setor);
+    if (!sData.length) return;
+    const allAvgs = MONTHS.map(m => {
+      const vals = sData.filter(d => d.mes === m).map(d => d.perc);
+      return vals.length ? +avg(vals).toFixed(1) : null;
+    });
+    const valid = allAvgs.filter(v => v !== null);
+    if (valid.length < 2) return;
+
+    // Linear regression on last 4 available months
+    const last = valid.slice(-4);
+    const n = last.length, sx = n*(n-1)/2, sy = last.reduce((s,v)=>s+v,0);
+    const sxy = last.reduce((s,v,i)=>s+i*v,0), sx2 = last.reduce((s,_,i)=>s+i*i,0);
+    const den = n*sx2 - sx*sx;
+    const slope = den ? (n*sxy - sx*sy)/den : 0;
+    const proj = +Math.max(10, Math.min(150, (sy - slope*sx)/n + slope*n)).toFixed(1);
+
+    const color = SECTOR_COLORS[setor] || '#9a9a9a';
+    const lastRealIdx = allAvgs.reduce((li,v,i) => v !== null ? i : li, -1);
+
+    // Historical
+    datasets.push({
+      label: setor,
+      data: [...allAvgs, null],
+      borderColor: color, backgroundColor: 'transparent', borderWidth: 2,
+      pointRadius: allAvgs.map((_,i) => i === lastRealIdx ? 4 : 0),
+      pointBackgroundColor: color, tension: 0.35, spanGaps: true,
+    });
+    // Projected dashed
+    const projData = allAvgs.map((v,i) => i === lastRealIdx ? v : null);
+    projData.push(proj);
+    datasets.push({
+      label: setor + ' ᵖ',
+      data: projData,
+      borderColor: color, borderWidth: 2, borderDash: [5,4],
+      backgroundColor: 'transparent',
+      pointRadius: projData.map((_,i) => i === projData.length-1 ? 4 : 0),
+      pointBackgroundColor: color, tension: 0.35, spanGaps: true,
+    });
+  });
+
+  destroyChart(chartProjecao);
+  chartProjecao = new Chart(document.getElementById('chartProjecao'), {
+    type: 'line',
+    data: { labels, datasets },
+    options: {
+      responsive: true,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { display: false },
+        datalabels: { display: false },
+        tooltip: {
+          filter: i => i.parsed.y !== null,
+          callbacks: { label: ctx => {
+            if (ctx.parsed.y === null) return null;
+            const isP = ctx.dataset.label.endsWith('ᵖ');
+            return ` ${ctx.dataset.label.replace(' ᵖ','')}${isP?' (proj)':''}: ${ctx.parsed.y.toFixed(1)}%`;
+          }}
+        }
+      },
+      scales: {
+        x: { ticks:{color:tickColor}, grid:{color:gridColor} },
+        y: { ticks:{color:tickColor, callback:v=>v+'%'}, grid:{color:gridColor}, min:30, max:140 }
+      }
+    }
+  });
+}
+
+// ─── TENDÊNCIAS & INSIGHTS ────────────────────────────────────────────────────
+function buildTendencias(data) {
+  const wrap = document.getElementById('tendencias-wrap');
+  if (!wrap || MONTHS.length < 2 || !data.length) { if(wrap) wrap.innerHTML=''; return; }
+
+  const activeNames = isActiveFilterOn() ? getActiveNames() : null;
+  const filtered = raw.filter(d => !excluded.has(d.nome) && (!activeNames || activeNames.has(d.nome)));
+
+  const lastM = MONTHS[MONTHS.length - 1];
+  const prevM = MONTHS[MONTHS.length - 2];
+  const lastAvg = avg(filtered.filter(d => d.mes === lastM).map(d => d.perc));
+  const prevAvg = avg(filtered.filter(d => d.mes === prevM).map(d => d.perc));
+  const delta = lastAvg - prevAvg;
+
+  // Sector averages in full period
+  const secMap = {};
+  filtered.forEach(d => { if(!secMap[d.setor]) secMap[d.setor]=[]; secMap[d.setor].push(d.perc); });
+  const secAvgs = Object.entries(secMap).map(([s,v])=>({s,a:avg(v)})).sort((a,b)=>b.a-a.a);
+  const best = secAvgs[0], worst = secAvgs[secAvgs.length-1];
+
+  // Sector deltas last 2 months
+  const secDeltas = Object.keys(secMap).map(setor => {
+    const lv = avg(filtered.filter(d=>d.setor===setor&&d.mes===lastM).map(d=>d.perc)||[0]);
+    const pv = avg(filtered.filter(d=>d.setor===setor&&d.mes===prevM).map(d=>d.perc)||[0]);
+    return { setor, delta: lv - pv };
+  }).filter(s=>isFinite(s.delta)).sort((a,b)=>b.delta-a.delta);
+  const rising = secDeltas[0];
+  const falling = secDeltas[secDeltas.length-1];
+
+  const items = [
+    {
+      icon: delta>=0?'📈':'📉', col: delta>=0?'#61DD75':'#fc8181',
+      title: `Tendência geral em ${lastM}: ${delta>=0?'alta':'queda'} de ${Math.abs(delta).toFixed(1)}pp`,
+      text: `Média consolidada de <strong>${lastAvg.toFixed(1)}%</strong> vs ${prevAvg.toFixed(1)}% em ${prevM}. ${Math.abs(delta)>5?delta<0?'Atenção: queda relevante — monitorar de perto.':'Resultado positivo — tendência favorável.':'Variação dentro da faixa normal.'}`
+    },
+    {
+      icon: '🏆', col: '#C9A84C',
+      title: `Destaque: ${best.s} (${best.a.toFixed(1)}%)`,
+      text: `Maior média do período${best.a>=100?' — acima da meta de 100%':' — próximo da meta'}. Consistência deste setor pode ser referência interna de boas práticas.`
+    },
+    {
+      icon: rising&&rising.delta>0?'⬆️':'➡️', col: '#61DD75',
+      title: rising ? `Maior alta: ${rising.setor} (+${rising.delta.toFixed(1)}pp)` : 'Evolução estável',
+      text: rising&&rising.delta>0 ? `${rising.setor} registrou a maior evolução de ${prevM} → ${lastM}: <strong>+${rising.delta.toFixed(1)}pp</strong>. Tendência positiva no período.` : `Sem variação significativa entre os setores no último mês.`
+    },
+    {
+      icon: '⚠️', col: '#fc8181',
+      title: `Atenção: ${worst.s} (${worst.a.toFixed(1)}%)`,
+      text: `Menor média do período. ${falling&&falling.setor===worst.s?`Queda de <strong>${Math.abs(falling.delta).toFixed(1)}pp</strong> no último mês — plano de reversão recomendado.`:'Monitoramento próximo necessário para o próximo ciclo.'}`
+    },
+  ];
+
+  wrap.innerHTML = `<div class="tendencias-grid">${items.map(i=>`
+    <div style="background:#161616;border:1px solid #2a2a2a;border-radius:10px;padding:16px 18px;display:flex;gap:12px;align-items:flex-start">
+      <div style="width:36px;height:36px;border-radius:8px;background:${i.col}18;display:flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0">${i.icon}</div>
+      <div>
+        <div style="font-size:12px;font-weight:700;color:${i.col};margin-bottom:4px">${i.title}</div>
+        <div style="font-size:12px;color:#9a9a9a;line-height:1.6">${i.text}</div>
+      </div>
+    </div>`).join('')}</div>`;
+}
+
 // ─── RENDER ALL ───────────────────────────────────────────────────────────────
 function render() {
   currentPage = 1;
@@ -1278,6 +1518,9 @@ function render() {
   buildChartDist(data);
   buildChartLinePreview();
   buildChartSectorLine(data);
+  buildMatrizSetores(data);
+  buildProjecaoPreditiva();
+  buildTendencias(data);
   renderTable();
   if (typeof activeSection !== 'undefined') {
     if (activeSection === 'colaboradores') buildColaboradoresSection(data);
