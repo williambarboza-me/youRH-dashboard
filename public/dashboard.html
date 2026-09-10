@@ -512,7 +512,8 @@
   <!-- ─── PROJEÇÃO PREDITIVA (FULL WIDTH) ───────────────────────────────────── -->
   <div class="chart-card" style="margin-bottom:20px">
     <h3>📈 Projeção Preditiva por Setor</h3>
-    <p class="note">Linha sólida = realizado · Tracejado = próximo mês (regressão linear)</p>
+    <p class="note">Linha sólida = realizado · Tracejado = próximo mês (regressão linear) · Clique nos setores para comparar</p>
+    <div id="projecao-legend" style="display:flex;flex-wrap:wrap;gap:8px;margin:10px 0 10px"></div>
     <canvas id="chartProjecao" height="140"></canvas>
   </div>
 
@@ -1358,7 +1359,47 @@ function buildMatrizSetores(data) {
 
 // ─── CHART: PROJEÇÃO PREDITIVA ────────────────────────────────────────────────
 let chartProjecao;
+let projecaoHidden = new Set();
+
+function renderProjecaoLegend(sectorList) {
+  const wrap = document.getElementById('projecao-legend');
+  if (!wrap || !chartProjecao) return;
+  wrap.innerHTML = '';
+  // "Todos" reset pill
+  const anyHidden = projecaoHidden.size > 0;
+  if (anyHidden) {
+    const rst = document.createElement('button');
+    rst.style.cssText = 'display:flex;align-items:center;gap:6px;background:#61DD7522;border:1.5px solid #61DD75;border-radius:20px;padding:4px 12px;cursor:pointer;font-size:11px;color:#61DD75;letter-spacing:.3px;';
+    rst.textContent = '↺ Todos';
+    rst.onclick = () => {
+      projecaoHidden.clear();
+      chartProjecao.data.datasets.forEach((_,idx) => chartProjecao.setDatasetVisibility(idx, true));
+      chartProjecao.update();
+      renderProjecaoLegend(sectorList);
+    };
+    wrap.appendChild(rst);
+  }
+  sectorList.forEach(setor => {
+    const color = SECTOR_COLORS[setor] || '#9a9a9a';
+    const isHidden = projecaoHidden.has(setor);
+    const chip = document.createElement('button');
+    chip.style.cssText = `display:flex;align-items:center;gap:6px;background:${isHidden?'transparent':color+'1a'};border:1.5px solid ${isHidden?'#3a3a3a':color};border-radius:20px;padding:4px 12px;cursor:pointer;font-size:12px;color:${isHidden?'#505050':'#e0e0e0'};transition:all .15s;`;
+    chip.innerHTML = `<span style="width:9px;height:9px;border-radius:50%;background:${isHidden?'#3a3a3a':color};display:inline-block;flex-shrink:0"></span>${setor}`;
+    chip.onclick = () => {
+      if (projecaoHidden.has(setor)) projecaoHidden.delete(setor);
+      else projecaoHidden.add(setor);
+      chartProjecao.data.datasets.forEach((ds, idx) => {
+        if (ds.label === setor || ds.label === setor + ' ᵖ')
+          chartProjecao.setDatasetVisibility(idx, !projecaoHidden.has(setor));
+      });
+      chartProjecao.update();
+      renderProjecaoLegend(sectorList);
+    };
+    wrap.appendChild(chip);
+  });
+}
 function buildProjecaoPreditiva() {
+  projecaoHidden = new Set(); // reset selection on every rebuild
   const activeNames = isActiveFilterOn() ? getActiveNames() : null;
   const filtered = raw.filter(d => !excluded.has(d.nome) && (!activeNames || activeNames.has(d.nome)));
   const sectors = [...new Set(raw.filter(d => !excluded.has(d.nome)).map(d => d.setor))].sort();
@@ -1411,6 +1452,7 @@ function buildProjecaoPreditiva() {
     });
   });
 
+  const activeSectors = [...new Set(datasets.map(ds => ds.label.replace(' ᵖ', '')))];
   destroyChart(chartProjecao);
   chartProjecao = new Chart(document.getElementById('chartProjecao'), {
     type: 'line',
@@ -1436,6 +1478,7 @@ function buildProjecaoPreditiva() {
       }
     }
   });
+  renderProjecaoLegend(activeSectors);
 }
 
 // ─── TENDÊNCIAS & INSIGHTS ────────────────────────────────────────────────────
