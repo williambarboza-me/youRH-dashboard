@@ -660,11 +660,23 @@
       </div>
       <div id="nu-setor-wrap" style="display:none;margin-bottom:14px;">
         <label style="display:block;font-size:0.72rem;color:#9a9a9a;text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px;">Setor</label>
+        <!-- dropdown: gestor / colaborador -->
         <select id="nu-setor" style="width:100%;background:#1c1c1c;border:1px solid #2e2e2e;border-radius:7px;padding:10px 12px;color:#e2e8f0;font-size:0.88rem;font-family:inherit;outline:none;cursor:pointer;">
           <option value="">— selecione —</option>
           <option>CS</option><option>Tech</option><option>Vendas</option>
           <option>Pré vendas</option><option>Marketing</option><option>Conteúdo</option><option>Produto</option><option>Financeiro</option>
         </select>
+        <!-- checkboxes: lider (múltiplos setores) -->
+        <div id="nu-setor-checks" style="display:none;flex-wrap:wrap;gap:8px;margin-top:4px;">
+          <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:0.85rem;color:#e2e8f0;background:#1c1c1c;border:1px solid #2e2e2e;border-radius:7px;padding:7px 12px;"><input type="checkbox" value="CS" style="accent-color:#61DD75"> CS</label>
+          <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:0.85rem;color:#e2e8f0;background:#1c1c1c;border:1px solid #2e2e2e;border-radius:7px;padding:7px 12px;"><input type="checkbox" value="Tech" style="accent-color:#61DD75"> Tech</label>
+          <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:0.85rem;color:#e2e8f0;background:#1c1c1c;border:1px solid #2e2e2e;border-radius:7px;padding:7px 12px;"><input type="checkbox" value="Vendas" style="accent-color:#61DD75"> Vendas</label>
+          <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:0.85rem;color:#e2e8f0;background:#1c1c1c;border:1px solid #2e2e2e;border-radius:7px;padding:7px 12px;"><input type="checkbox" value="Pré vendas" style="accent-color:#61DD75"> Pré vendas</label>
+          <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:0.85rem;color:#e2e8f0;background:#1c1c1c;border:1px solid #2e2e2e;border-radius:7px;padding:7px 12px;"><input type="checkbox" value="Marketing" style="accent-color:#61DD75"> Marketing</label>
+          <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:0.85rem;color:#e2e8f0;background:#1c1c1c;border:1px solid #2e2e2e;border-radius:7px;padding:7px 12px;"><input type="checkbox" value="Conteúdo" style="accent-color:#61DD75"> Conteúdo</label>
+          <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:0.85rem;color:#e2e8f0;background:#1c1c1c;border:1px solid #2e2e2e;border-radius:7px;padding:7px 12px;"><input type="checkbox" value="Produto" style="accent-color:#61DD75"> Produto</label>
+          <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:0.85rem;color:#e2e8f0;background:#1c1c1c;border:1px solid #2e2e2e;border-radius:7px;padding:7px 12px;"><input type="checkbox" value="Financeiro" style="accent-color:#61DD75"> Financeiro</label>
+        </div>
       </div>
       <div style="margin-bottom:22px;">
         <label style="display:block;font-size:0.72rem;color:#9a9a9a;text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px;">Senha inicial</label>
@@ -1763,6 +1775,7 @@ function openAddUser() {
   document.getElementById('nu-email').value = '';
   document.getElementById('nu-role').value = 'colaborador';
   document.getElementById('nu-setor').value = '';
+  document.querySelectorAll('#nu-setor-checks input').forEach(c => c.checked = false);
   document.getElementById('nu-senha').value = '';
   const _m = document.getElementById('nu-msg');
   _m.textContent = ''; _m.style.display = 'none';
@@ -1778,8 +1791,10 @@ function toggleSetorField() {
   const role = document.getElementById('nu-role').value;
   const show = role === 'gestor' || role === 'colaborador' || role === 'lider';
   document.getElementById('nu-setor-wrap').style.display = show ? '' : 'none';
-  const setorEl = document.getElementById('nu-setor');
-  if (setorEl) setorEl.placeholder = role === 'lider' ? 'Ex: CS,Tech (vírgula para múltiplos)' : 'Ex: Tech';
+  // lider → checkboxes; outros → dropdown
+  const isLider = role === 'lider';
+  document.getElementById('nu-setor').style.display = isLider ? 'none' : '';
+  document.getElementById('nu-setor-checks').style.display = isLider ? 'flex' : 'none';
 }
 
 async function submitNewUser() {
@@ -1787,7 +1802,9 @@ async function submitNewUser() {
   const nome  = document.getElementById('nu-nome').value.trim();
   const email = document.getElementById('nu-email').value.trim();
   const role  = document.getElementById('nu-role').value;
-  const setor = document.getElementById('nu-setor').value.trim();
+  const setor = role === 'lider'
+    ? [...document.querySelectorAll('#nu-setor-checks input:checked')].map(c => c.value).join(',')
+    : document.getElementById('nu-setor').value.trim();
   const senha = document.getElementById('nu-senha').value;
 
   function showMsg(text, color) {
