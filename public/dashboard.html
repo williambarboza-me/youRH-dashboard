@@ -653,6 +653,7 @@
           <option value="">— selecione —</option>
           <option value="rh_admin">Admin RH (vê tudo + gestão de usuários)</option>
           <option value="direcao">Direção (vê tudo, sem gestão de usuários)</option>
+          <option value="lider">Líder (vê sua área + agregado das outras)</option>
           <option value="gestor">Gestor (vê apenas o setor)</option>
           <option value="colaborador">Colaborador (vê apenas os próprios dados)</option>
         </select>
@@ -687,7 +688,7 @@ const raw = (window.__YOURH_DATA__ || []);
 (function() {
   if (!window.__YOURH_DATA__) { window.location.href = '/login'; return; }
   const u = window.__YOURH_USER__ || {};
-  const roleLabel = { rh_admin: 'Admin RH', direcao: 'Direção', gestor: 'Gestor', colaborador: 'Colaborador' };
+  const roleLabel = { rh_admin: 'Admin RH', direcao: 'Direção', gestor: 'Gestor', lider: 'Líder', colaborador: 'Colaborador' };
   document.addEventListener('DOMContentLoaded', () => {
     const n = document.getElementById('user-nome');
     const r = document.getElementById('user-role');
@@ -803,9 +804,10 @@ const Q2_MONTHS = ['Abril','Maio','Junho'];
 const excluded = new Set();
 
 // Collaborator is "active" if they have a record in the last available month
+// '__agg__' são registros anonimizados (lider role) — nunca tratados como colaborador real
 function getActiveNames() {
   const lastMonth = MONTHS[MONTHS.length - 1];
-  return new Set(raw.filter(d => d.mes === lastMonth && !excluded.has(d.nome)).map(d => d.nome));
+  return new Set(raw.filter(d => d.nome !== '__agg__' && d.mes === lastMonth && !excluded.has(d.nome)).map(d => d.nome));
 }
 
 function isActiveFilterOn() {
@@ -836,6 +838,7 @@ function getFiltered() {
   const qMonths = m === 'Q1' ? Q1_MONTHS : m === 'Q2' ? Q2_MONTHS : null;
   const activeNames = isActiveFilterOn() ? getActiveNames() : null;
   return raw.filter(d =>
+    d.nome !== '__agg__' &&
     !excluded.has(d.nome) &&
     (!activeNames || activeNames.has(d.nome)) &&
     (m === 'all' || (qMonths ? qMonths.includes(d.mes) : d.mes === m)) &&
@@ -850,7 +853,7 @@ const sectors = [...new Set(raw.map(d=>d.setor))].sort();
 const sf = document.getElementById('filter-sector');
 sectors.forEach(s => { const o=document.createElement('option'); o.value=s; o.textContent=s; sf.appendChild(o); });
 
-const names = [...new Set(raw.map(d=>d.nome))].sort((a,b)=>a.localeCompare(b));
+const names = [...new Set(raw.filter(d=>d.nome!=='__agg__').map(d=>d.nome))].sort((a,b)=>a.localeCompare(b));
 const cs = document.getElementById('collab-select');
 names.forEach(n => { const o=document.createElement('option'); o.value=n; o.textContent=n; cs.appendChild(o); });
 
@@ -1719,7 +1722,7 @@ async function loadUsersTable() {
       wrap.innerHTML = '<p style="color:#aaa;padding:16px">Nenhum usuário cadastrado ainda.</p>';
       return;
     }
-    const roleLabel = { rh_admin: 'Admin RH', direcao: 'Direção', gestor: 'Gestor', colaborador: 'Colaborador' };
+    const roleLabel = { rh_admin: 'Admin RH', direcao: 'Direção', gestor: 'Gestor', lider: 'Líder', colaborador: 'Colaborador' };
     const rows = users.map(u => `
       <tr>
         <td style="padding:10px 14px">${esc(u.nome)}</td>
@@ -1773,8 +1776,10 @@ function closeAddUser() {
 
 function toggleSetorField() {
   const role = document.getElementById('nu-role').value;
-  const show = role === 'gestor' || role === 'colaborador';
+  const show = role === 'gestor' || role === 'colaborador' || role === 'lider';
   document.getElementById('nu-setor-wrap').style.display = show ? '' : 'none';
+  const setorEl = document.getElementById('nu-setor');
+  if (setorEl) setorEl.placeholder = role === 'lider' ? 'Ex: CS,Tech (vírgula para múltiplos)' : 'Ex: Tech';
 }
 
 async function submitNewUser() {
@@ -1792,7 +1797,7 @@ async function submitNewUser() {
   }
 
   if (!nome || !email || !senha) { showMsg('Preencha nome, e-mail e senha.'); return; }
-  if ((role === 'gestor' || role === 'colaborador') && !setor) { showMsg('Informe o setor para este papel.'); return; }
+  if ((role === 'gestor' || role === 'colaborador' || role === 'lider') && !setor) { showMsg('Informe o setor para este papel.'); return; }
 
   showMsg('Salvando...', '#aaa');
   try {
@@ -2207,6 +2212,8 @@ function buildHeatmapSection() {
 }
 
 function buildHeatmapColab(activeRaw) {
+  // Exclui registros anonimizados do lider (outras áreas)
+  activeRaw = activeRaw.filter(d => d.nome !== '__agg__');
   const byName = {};
   activeRaw.forEach(d => {
     if (!byName[d.nome]) byName[d.nome] = { setor: d.setor, percs: [] };

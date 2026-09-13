@@ -248,6 +248,14 @@ function filterByRole(data, user) {
     case 'direcao':    return data;
     case 'gestor':     return data.filter(d => d.setor === user.setor);
     case 'colaborador':return data.filter(d => d.nome === user.nome);
+    case 'lider': {
+      // Lider vê dados completos da(s) sua(s) área(s); demais setores chegam
+      // anonimizados (nome='__agg__') para permitir comparações agregadas.
+      const setores = (user.setor || '').split(',').map(s => s.trim()).filter(Boolean);
+      return data.map(d =>
+        setores.includes(d.setor) ? d : { mes: d.mes, setor: d.setor, perc: d.perc, nome: '__agg__' }
+      );
+    }
     default:           return [];
   }
 }
@@ -327,11 +335,11 @@ app.post('/api/admin/users', requireAuthAPI, requireAdmin, async (req, res) => {
   if (!email || !nome || !role || !password) {
     return res.status(400).json({ error: 'Campos obrigatórios: email, nome, role, password' });
   }
-  if (!['rh_admin', 'direcao', 'gestor', 'colaborador'].includes(role)) {
-    return res.status(400).json({ error: 'Role inválido. Use: rh_admin | direcao | gestor | colaborador' });
+  if (!['rh_admin', 'direcao', 'gestor', 'colaborador', 'lider'].includes(role)) {
+    return res.status(400).json({ error: 'Role inválido. Use: rh_admin | direcao | gestor | colaborador | lider' });
   }
-  if (role === 'gestor' && !setor) {
-    return res.status(400).json({ error: 'Gestor precisa de setor definido' });
+  if ((role === 'gestor' || role === 'lider') && !setor) {
+    return res.status(400).json({ error: 'Gestor/Líder precisam de setor definido (use vírgula para múltiplos, ex: CS,Tech)' });
   }
   if (USERS.find(u => u.email.toLowerCase() === email.toLowerCase())) {
     return res.status(409).json({ error: 'E-mail já cadastrado' });
