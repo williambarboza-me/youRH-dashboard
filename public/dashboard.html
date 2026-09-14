@@ -376,7 +376,8 @@
     <label>Mês</label>
     <select id="filter-month">
       <option value="all">Todos os meses</option>
-      <optgroup label="── Trimestres">
+      <optgroup label="── Períodos">
+        <option value="L3M">Últimos 3 meses</option>
         <option value="Q1">Q1 — Jan · Fev · Mar</option>
         <option value="Q2">Q2 — Abr · Mai · Jun</option>
       </optgroup>
@@ -813,6 +814,8 @@ function matchRange(perc, range) {
 
 const Q1_MONTHS = ['Janeiro','Fevereiro','Março'];
 const Q2_MONTHS = ['Abril','Maio','Junho'];
+// Últimos 3 meses — dinâmico, baseado nos meses disponíveis no raw
+const L3M_MONTHS = MONTHS.slice(-3);
 const excluded = new Set();
 
 // Collaborator is "active" if they have a record in the last available month
@@ -847,7 +850,7 @@ function getFiltered() {
   const s = document.getElementById('filter-sector').value;
   const r = document.getElementById('filter-range').value;
   const q = document.getElementById('search').value.toLowerCase();
-  const qMonths = m === 'Q1' ? Q1_MONTHS : m === 'Q2' ? Q2_MONTHS : null;
+  const qMonths = m === 'Q1' ? Q1_MONTHS : m === 'Q2' ? Q2_MONTHS : m === 'L3M' ? L3M_MONTHS : null;
   const activeNames = isActiveFilterOn() ? getActiveNames() : null;
   return raw.filter(d =>
     d.nome !== '__agg__' &&
