@@ -353,7 +353,7 @@
   <div class="sidebar-footer">
     <span id="sidebar-period">Dados: Jan – Jun 2026</span><br>
     <span id="sidebar-update">Última atualiz.: Jul 2026</span><br>
-    <span style="color:#3a3a3a;font-size:10px;letter-spacing:.5px">v1.9.4</span>
+    <span style="color:#3a3a3a;font-size:10px;letter-spacing:.5px">v1.9.5</span>
   </div>
 </aside>
 <div class="main-wrap">
@@ -1234,7 +1234,7 @@ function buildKPIs(data) {
       <div class="kpi-value blue">${pctAbove}%</div>
       <div class="kpi-sub">${above100} de ${totalPessoas} pessoas</div>
     </div>
-    <div class="kpi">
+    <div class="kpi clickable" onclick="openKpiModal('topPerformer')">
       <div class="kpi-label">Top Performer</div>
       <div class="kpi-value green">${top ? top.media.toFixed(1)+'%' : '—'}</div>
       <div class="kpi-sub">${top ? top.nome.split(' ')[0]+' · média de '+top.meses+' '+(top.meses!==1?'meses':'mês') : 'sem colaborador ativo no período'}</div>
@@ -1861,6 +1861,38 @@ function openKpiModal(type) {
     document.getElementById('modalCount').textContent = contagem;
     document.getElementById('modalList').innerHTML = listHtml;
     document.getElementById('kpiModal').classList.add('open');
+  }
+
+  // ── Top Performer: ranking dos elegíveis com o histórico mês a mês ──────────
+  // Mesmas três travas do card (ativo, mínimo de meses, ordenado por média),
+  // para que a primeira linha da lista seja exatamente quem o card exibe. Se
+  // divergissem, o popup pareceria quebrado.
+  if (type === 'topPerformer') {
+    const { pessoas, meses } = agruparPeriodo();
+    const MIN_MESES = Math.min(3, meses.length || 1);
+    const ativos = getActiveNames();
+    const ranking = pessoas
+      .map(p => ({ ...p, media: avg(p.entries.map(d => d.perc)), qtd: p.entries.length }))
+      .filter(p => ativos.has(p.nome) && p.qtd >= MIN_MESES)
+      .sort((a, b) => b.media - a.media)
+      .slice(0, 10); // o ranking completo vive na seção Colaboradores
+
+    const medalha = i => i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `<span style="opacity:.5">${i + 1}º</span>`;
+
+    const listHtml = ranking.length
+      ? ranking.map((p, i) => `<div class="modal-item">
+          <span class="modal-item-name">
+            <span style="display:inline-block;min-width:26px;margin-right:6px">${medalha(i)}</span>${p.nome}
+          </span>
+          <span class="modal-item-sector">${p.setor} · média ${p.media.toFixed(1)}%</span>
+          <span class="modal-item-months">${chipsDe(p, meses)}</span>
+        </div>`).join('')
+      : `<p style="color:#aaa;padding:16px">Ninguém elegível: é preciso ter registro no último mês e presença em pelo menos ${MIN_MESES} ${MIN_MESES !== 1 ? 'meses' : 'mês'} do período.</p>`;
+
+    abrirModal('#61DD75', '🏆 Top performers — período selecionado',
+      `${ranking.length} de ${pessoas.filter(p => ativos.has(p.nome)).length} colaboradores ativos · ${meses.join(', ')}`,
+      listHtml);
+    return;
   }
 
   // ── Abaixo de 80%: pessoas com ao menos um mês abaixo de 80% no período ─────
