@@ -353,7 +353,7 @@
   <div class="sidebar-footer">
     <span id="sidebar-period">Dados: Jan – Jun 2026</span><br>
     <span id="sidebar-update">Última atualiz.: Jul 2026</span><br>
-    <span style="color:#3a3a3a;font-size:10px;letter-spacing:.5px">v1.9.2</span>
+    <span style="color:#3a3a3a;font-size:10px;letter-spacing:.5px">v1.9.3</span>
   </div>
 </aside>
 <div class="main-wrap">
@@ -1571,20 +1571,42 @@ function renderProjecaoLegend(sectorList) {
   const wrap = document.getElementById('projecao-legend');
   if (!wrap || !chartProjecao) return;
   wrap.innerHTML = '';
-  // "Todos" reset pill
-  const anyHidden = projecaoHidden.size > 0;
-  if (anyHidden) {
-    const rst = document.createElement('button');
-    rst.style.cssText = 'display:flex;align-items:center;gap:6px;background:#61DD7522;border:1.5px solid #61DD75;border-radius:20px;padding:4px 12px;cursor:pointer;font-size:11px;color:#61DD75;letter-spacing:.3px;';
-    rst.textContent = '↺ Todos';
-    rst.onclick = () => {
-      projecaoHidden.clear();
-      chartProjecao.data.datasets.forEach((_,idx) => chartProjecao.setDatasetVisibility(idx, true));
-      chartProjecao.update();
-      renderProjecaoLegend(sectorList);
-    };
-    wrap.appendChild(rst);
+
+  // Aplica no gráfico o estado atual de projecaoHidden. Cada setor tem dois
+  // datasets — o realizado e o projetado (sufixo ' ᵖ') — e ambos precisam
+  // acompanhar a mesma decisão de visibilidade.
+  function aplicarVisibilidade() {
+    chartProjecao.data.datasets.forEach((ds, idx) => {
+      const base = sectorList.find(s => ds.label === s || ds.label === s + ' ᵖ');
+      if (base) chartProjecao.setDatasetVisibility(idx, !projecaoHidden.has(base));
+    });
+    chartProjecao.update();
   }
+
+  // Botão "Todos" — sempre visível e alternando entre mostrar e ocultar tudo.
+  // Antes ele só aparecia depois que algum setor era ocultado, o que escondia
+  // justamente o atalho mais útil: com 9 setores sobrepostos, o fluxo natural é
+  // limpar a tela e trazer de volta só as áreas que se quer comparar. Sem ele,
+  // isolar duas áreas exigia sete cliques.
+  const todosVisiveis = projecaoHidden.size === 0;
+  const btn = document.createElement('button');
+  btn.style.cssText = 'display:flex;align-items:center;gap:6px;'
+    + `background:${todosVisiveis ? 'transparent' : '#61DD7522'};`
+    + `border:1.5px solid ${todosVisiveis ? '#3a3a3a' : '#61DD75'};`
+    + 'border-radius:20px;padding:4px 12px;cursor:pointer;font-size:11px;'
+    + `color:${todosVisiveis ? '#8a8a8a' : '#61DD75'};letter-spacing:.3px;`
+    + 'font-family:inherit;transition:all .15s;margin-right:4px;';
+  btn.textContent = todosVisiveis ? '✕ Ocultar todos' : '↺ Mostrar todos';
+  btn.title = todosVisiveis
+    ? 'Limpa o gráfico para você trazer de volta só as áreas que quer comparar'
+    : 'Traz todas as áreas de volta';
+  btn.onclick = () => {
+    if (todosVisiveis) sectorList.forEach(s => projecaoHidden.add(s));
+    else projecaoHidden.clear();
+    aplicarVisibilidade();
+    renderProjecaoLegend(sectorList);
+  };
+  wrap.appendChild(btn);
   sectorList.forEach(setor => {
     const color = sectorColor(setor);
     const isHidden = projecaoHidden.has(setor);
@@ -1594,11 +1616,7 @@ function renderProjecaoLegend(sectorList) {
     chip.onclick = () => {
       if (projecaoHidden.has(setor)) projecaoHidden.delete(setor);
       else projecaoHidden.add(setor);
-      chartProjecao.data.datasets.forEach((ds, idx) => {
-        if (ds.label === setor || ds.label === setor + ' ᵖ')
-          chartProjecao.setDatasetVisibility(idx, !projecaoHidden.has(setor));
-      });
-      chartProjecao.update();
+      aplicarVisibilidade();
       renderProjecaoLegend(sectorList);
     };
     wrap.appendChild(chip);
