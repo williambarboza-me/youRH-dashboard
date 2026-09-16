@@ -353,7 +353,7 @@
   <div class="sidebar-footer">
     <span id="sidebar-period">Dados: Jan – Jun 2026</span><br>
     <span id="sidebar-update">Última atualiz.: Jul 2026</span><br>
-    <span style="color:#3a3a3a;font-size:10px;letter-spacing:.5px">v1.8.4</span>
+    <span style="color:#3a3a3a;font-size:10px;letter-spacing:.5px">v1.8.5</span>
   </div>
 </aside>
 <div class="main-wrap">
@@ -428,6 +428,19 @@
     <div class="chart-card">
       <h3>Média por Setor (período selecionado)</h3>
       <canvas id="chartSectors" height="220"></canvas>
+    </div>
+  </div>
+
+  <!-- ─── DISTRIBUIÇÃO MENSAL ─────────────────────────────────────────────── -->
+  <div class="section-title">📊 Distribuição Mensal de Performance</div>
+  <div class="charts-row charts-row-2" style="margin-bottom:20px">
+    <div class="chart-card">
+      <h3>% Acima de 100% — Mês a Mês</h3>
+      <canvas id="chartMonthAbove" height="200"></canvas>
+    </div>
+    <div class="chart-card">
+      <h3>% Abaixo de 80% — Mês a Mês</h3>
+      <canvas id="chartMonthBelow" height="200"></canvas>
     </div>
   </div>
 
@@ -873,7 +886,7 @@ const cs = document.getElementById('collab-select');
 names.forEach(n => { const o=document.createElement('option'); o.value=n; o.textContent=n; cs.appendChild(o); });
 
 // ─── CHART INSTANCES ─────────────────────────────────────────────────────────
-let chartMonths, chartSectors, chartTop10, chartDist, chartCollab;
+let chartMonths, chartSectors, chartTop10, chartDist, chartCollab, chartMonthAbove, chartMonthBelow;
 function destroyChart(c) { if(c) c.destroy(); }
 
 const gridColor = '#1c1c1c';
@@ -999,6 +1012,81 @@ function buildChartDist(data) {
   });
 }
 
+// ─── CHARTS: DISTRIBUIÇÃO MENSAL (acima 100% e abaixo 80%) ───────────────────
+function buildChartMonthDist(data) {
+  // Compute unique persons per month from filtered data
+  // For each MONTH, count distinct people with perc>=100 and perc<80
+  const monthAboveCounts = [];
+  const monthBelowCounts = [];
+  const monthTotals = [];
+
+  // Build per-month sets of unique persons (respecting current filters)
+  MONTHS.forEach(m => {
+    const monthRows = data.filter(d => d.mes === m);
+    const uniqueNames = [...new Set(monthRows.map(d => d.nome))];
+    const total = uniqueNames.length;
+    const above = uniqueNames.filter(n => monthRows.find(d=>d.nome===n&&d.perc>=100)).length;
+    const below = uniqueNames.filter(n => monthRows.find(d=>d.nome===n&&d.perc<80)).length;
+    monthAboveCounts.push(total ? +(above/total*100).toFixed(1) : 0);
+    monthBelowCounts.push(total ? +(below/total*100).toFixed(1) : 0);
+    monthTotals.push(total);
+  });
+
+  const shortMonths = MONTHS.map(m => m.slice(0,3));
+
+  destroyChart(chartMonthAbove);
+  chartMonthAbove = new Chart(document.getElementById('chartMonthAbove'), {
+    type: 'bar',
+    data: {
+      labels: shortMonths,
+      datasets: [{
+        data: monthAboveCounts,
+        backgroundColor: '#61DD75',
+        borderRadius: 6,
+        borderSkipped: false
+      }]
+    },
+    options: {
+      responsive: true, aspectRatio: 2.0, layout: { padding: { top: 22 } },
+      plugins: {
+        legend: { display: false },
+        datalabels: { anchor:'end', align:'top', color:'#b5b5b5', font:{size:10,weight:'600'}, formatter:v=>v+'%', clamp:true },
+        tooltip: { callbacks: { label: ctx => ` ${ctx.parsed.y}% (${monthTotals[ctx.dataIndex]} pessoas)` } }
+      },
+      scales: {
+        x: { ticks:{color:tickColor}, grid:{color:gridColor} },
+        y: { ticks:{color:tickColor, callback:v=>v+'%'}, grid:{color:gridColor}, min:0, suggestedMax:100 }
+      }
+    }
+  });
+
+  destroyChart(chartMonthBelow);
+  chartMonthBelow = new Chart(document.getElementById('chartMonthBelow'), {
+    type: 'bar',
+    data: {
+      labels: shortMonths,
+      datasets: [{
+        data: monthBelowCounts,
+        backgroundColor: '#fc8181',
+        borderRadius: 6,
+        borderSkipped: false
+      }]
+    },
+    options: {
+      responsive: true, aspectRatio: 2.0, layout: { padding: { top: 22 } },
+      plugins: {
+        legend: { display: false },
+        datalabels: { anchor:'end', align:'top', color:'#b5b5b5', font:{size:10,weight:'600'}, formatter:v=>v+'%', clamp:true },
+        tooltip: { callbacks: { label: ctx => ` ${ctx.parsed.y}% (${monthTotals[ctx.dataIndex]} pessoas)` } }
+      },
+      scales: {
+        x: { ticks:{color:tickColor}, grid:{color:gridColor} },
+        y: { ticks:{color:tickColor, callback:v=>v+'%'}, grid:{color:gridColor}, min:0, suggestedMax:100 }
+      }
+    }
+  });
+}
+
 // ─── KPIs ─────────────────────────────────────────────────────────────────────
 function buildKPIs(data) {
   const totalAvg = avg(data.map(d=>d.perc));
@@ -1035,7 +1123,7 @@ function buildKPIs(data) {
       <div class="kpi-value ${avgClass}">${totalAvg.toFixed(1)}%</div>
       <div class="kpi-sub">${data.length} registros</div>
     </div>
-    <div class="kpi">
+    <div class="kpi clickable" onclick="openKpiModal('aboveMeta')">
       <div class="kpi-label">Acima da Meta</div>
       <div class="kpi-value blue">${pctAbove}%</div>
       <div class="kpi-sub">${above100} de ${data.length} pessoas</div>
@@ -1570,6 +1658,7 @@ function render() {
   buildChartSectors(data);
   buildChartTop10(data);
   buildChartDist(data);
+  buildChartMonthDist(data);
   buildChartLinePreview();
   buildMatrizSetores(data);
   buildProjecaoPreditiva();
@@ -1618,6 +1707,49 @@ document.getElementById('collab-select').addEventListener('change', e => buildCo
 
 // ─── MODAL POPUP ─────────────────────────────────────────────────────────────
 function openKpiModal(type) {
+  // ── Acima da Meta: mostra pessoas com perc ≥ 100% no período filtrado atual ──
+  if (type === 'aboveMeta') {
+    const filtData = getFiltered();
+    const peopleMap = {};
+    filtData.forEach(d => {
+      if (!peopleMap[d.nome]) peopleMap[d.nome] = { nome: d.nome, setor: d.setor, entries: [] };
+      peopleMap[d.nome].entries.push(d);
+    });
+    const matched = Object.values(peopleMap)
+      .filter(p => p.entries.some(d => d.perc >= 100))
+      .sort((a, b) => {
+        const avgA = a.entries.reduce((s,d)=>s+d.perc,0)/a.entries.length;
+        const avgB = b.entries.reduce((s,d)=>s+d.perc,0)/b.entries.length;
+        return avgB - avgA;
+      });
+
+    const filterMonths = [...new Set(filtData.map(d=>d.mes))].sort((a,b)=>MONTHS.indexOf(a)-MONTHS.indexOf(b));
+
+    const listHtml = matched.length
+      ? matched.map(p => {
+          const chips = filterMonths.map(m => {
+            const entry = p.entries.find(d => d.mes === m);
+            if (!entry) return `<span class="modal-chip" style="opacity:0.3">—</span>`;
+            const cls = entry.perc >= 100 ? 'green' : entry.perc >= 90 ? 'yellow' : entry.perc >= 80 ? 'yellow' : 'red';
+            return `<span class="modal-chip ${cls}">${entry.perc.toFixed(0)}%</span>`;
+          }).join('');
+          return `<div class="modal-item">
+            <span class="modal-item-name">${p.nome}</span>
+            <span class="modal-item-sector">${p.setor}</span>
+            <span class="modal-item-months">${chips}</span>
+          </div>`;
+        }).join('')
+      : '<p style="color:#aaa;padding:16px">Nenhum colaborador acima da meta no período selecionado.</p>';
+
+    document.getElementById('modalBox').style.setProperty('--modal-accent', '#38BDF8');
+    document.getElementById('modalTitle').textContent = '🎯 Acima da Meta — período selecionado';
+    document.getElementById('modalCount').textContent =
+      `${matched.length} colaborador${matched.length!==1?'es':''} · ${filterMonths.join(', ')}`;
+    document.getElementById('modalList').innerHTML = listHtml;
+    document.getElementById('kpiModal').classList.add('open');
+    return;
+  }
+
   const last3 = MONTHS.slice(-3);
   const lastMonth = last3[last3.length - 1];
   const activeNames = isActiveFilterOn() ? getActiveNames() : null;
