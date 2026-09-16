@@ -353,7 +353,7 @@
   <div class="sidebar-footer">
     <span id="sidebar-period">Dados: Jan – Jun 2026</span><br>
     <span id="sidebar-update">Última atualiz.: Jul 2026</span><br>
-    <span style="color:#3a3a3a;font-size:10px;letter-spacing:.5px">v1.9.0</span>
+    <span style="color:#3a3a3a;font-size:10px;letter-spacing:.5px">v1.9.1</span>
   </div>
 </aside>
 <div class="main-wrap">
@@ -900,6 +900,24 @@ const gridColor = '#1c1c1c';
 const tickColor = '#9a9a9a';
 Chart.register(ChartDataLabels);
 
+// ─── VALORES SUSPEITOS ───────────────────────────────────────────────────────
+// Sinaliza registros que quase certamente são erro de cadastro, SEM alterar
+// nenhum cálculo: o painel não maquia nem esconde dado, apenas torna a anomalia
+// visível para quem pode investigar a origem na planilha.
+// 200% = o dobro da meta. Na base atual marca exatamente 1 registro em 333
+// (329,3%, seguido de 38,7% e 34,2% nos meses seguintes — padrão típico de meta
+// mal cadastrada). Um limite de 150% marcaria 11 registros e viraria ruído.
+// 0% quase sempre significa lançamento em branco, não entrega zerada.
+const PERC_SUSPEITO_ALTO = 200;
+function percSuspeito(perc) {
+  return perc >= PERC_SUSPEITO_ALTO || perc === 0;
+}
+function motivoSuspeito(perc) {
+  return perc === 0
+    ? 'Valor zerado — provável lançamento em branco na planilha. Confira a origem.'
+    : 'Mais que o dobro da meta — provável erro no cadastro da meta deste mês. Confira a origem.';
+}
+
 // Mantido apenas por compatibilidade — a cor de setor agora vem de sectorColor().
 const SECTOR_PALETTE = ['#61DD75','#9B5DE5'];
 // O servidor entrega os setores já canonizados (Tech→Tecnologia, MKT→Marketing).
@@ -1119,7 +1137,6 @@ function buildChartMonthDist(data) {
 // ─── KPIs ─────────────────────────────────────────────────────────────────────
 function buildKPIs(data) {
   const totalAvg = avg(data.map(d=>d.perc));
-  const top = data.length ? [...data].sort((a,b)=>b.perc-a.perc)[0] : null;
 
   // ─── CONTAGEM POR PESSOA, NÃO POR REGISTRO ─────────────────────────────────
   // Antes estes KPIs contavam registros (pessoa × mês) mas o rótulo dizia
@@ -1137,6 +1154,28 @@ function buildKPIs(data) {
 
   const activeSectors = [...new Set(data.map(d=>d.setor))].length;
   const activeMes = [...new Set(data.map(d=>d.mes))].length;
+
+  // ─── TOP PERFORMER: MÉDIA, ENTRE ATIVOS, COM MÍNIMO DE MESES ───────────────
+  // O critério anterior era o maior registro isolado do período. Bastava um mês
+  // anômalo para a pessoa ocupar o card de forma permanente — foi assim que uma
+  // ex-colaboradora com 329,3% num único mês (e 38% e 34% nos seguintes) ficou
+  // como Top Performer. Média premia consistência; o recorte de ativos evita
+  // celebrar quem já saiu; e o mínimo de meses impede que um pico isolado ou um
+  // recém-chegado com um único registro assumam o card. Sem o mínimo, aquela
+  // mesma ex-colaboradora ainda lideraria: média de 134,1% em 3 meses.
+  const MIN_MESES_TOP = Math.min(3, activeMes || 1);
+  const ativosTop = getActiveNames(); // quem tem registro no último mês da base
+  const top = (() => {
+    const candidatos = nomesKpi
+      .filter(n => ativosTop.has(n))
+      .map(n => {
+        const e = porPessoa[n];
+        return { nome: n, setor: e[e.length-1].setor, perc: avg(e.map(d=>d.perc)), meses: e.length };
+      })
+      .filter(c => c.meses >= MIN_MESES_TOP);
+    if (!candidatos.length) return null;
+    return candidatos.sort((a,b) => b.perc - a.perc)[0];
+  })();
   // ─── Last-3-months persistent KPIs (always from raw, filter-independent)
   const last3 = MONTHS.slice(-3);
   const lastMonthKpi = last3[last3.length - 1];
@@ -1172,7 +1211,7 @@ function buildKPIs(data) {
     <div class="kpi">
       <div class="kpi-label">Top Performer</div>
       <div class="kpi-value green">${top ? top.perc.toFixed(1)+'%' : '—'}</div>
-      <div class="kpi-sub">${top ? top.nome.split(' ')[0]+' · '+top.mes : ''}</div>
+      <div class="kpi-sub">${top ? top.nome.split(' ')[0]+' · média de '+top.meses+' '+(top.meses!==1?'meses':'mês') : 'sem colaborador ativo no período'}</div>
     </div>
     <div class="kpi clickable" onclick="openKpiModal('abaixoPeriodo')">
       <div class="kpi-label">Abaixo de 80%</div>
@@ -1418,6 +1457,7 @@ function renderTable() {
         <div class="perf-bar">
           <div class="perf-bar-track"><div class="perf-bar-fill" style="width:${fillW}%;background:${c}"></div></div>
           <span class="perf-text" style="color:${c}">${d.perc.toFixed(1)}%</span>
+          ${percSuspeito(d.perc) ? `<span title="${motivoSuspeito(d.perc)}" style="margin-left:6px;cursor:help;font-size:12px;opacity:.9">⚠️</span>` : ''}
         </div>
       </td>
     </tr>`;
