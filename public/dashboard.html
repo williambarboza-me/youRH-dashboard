@@ -353,7 +353,7 @@
   <div class="sidebar-footer">
     <span id="sidebar-period">Dados: Jan – Jun 2026</span><br>
     <span id="sidebar-update">Última atualiz.: Jul 2026</span><br>
-    <span style="color:#3a3a3a;font-size:10px;letter-spacing:.5px">v1.8.9</span>
+    <span style="color:#3a3a3a;font-size:10px;letter-spacing:.5px">v1.9.0</span>
   </div>
 </aside>
 <div class="main-wrap">
@@ -1119,10 +1119,22 @@ function buildChartMonthDist(data) {
 // ─── KPIs ─────────────────────────────────────────────────────────────────────
 function buildKPIs(data) {
   const totalAvg = avg(data.map(d=>d.perc));
-  const above100 = data.filter(d=>d.perc>=100).length;
-  const pctAbove = data.length ? (above100/data.length*100).toFixed(0) : 0;
   const top = data.length ? [...data].sort((a,b)=>b.perc-a.perc)[0] : null;
-  const below80 = data.filter(d=>d.perc<80).length;
+
+  // ─── CONTAGEM POR PESSOA, NÃO POR REGISTRO ─────────────────────────────────
+  // Antes estes KPIs contavam registros (pessoa × mês) mas o rótulo dizia
+  // "pessoas": com 8 meses de base, "75 pessoas abaixo de 80%" aparecia numa
+  // empresa de 47 pessoas. Além de impossível, divergia dos popups, que sempre
+  // listaram pessoas. Um colaborador abaixo da meta em três meses é uma pessoa
+  // em dificuldade, não três.
+  const porPessoa = {};
+  data.forEach(d => { (porPessoa[d.nome] = porPessoa[d.nome] || []).push(d); });
+  const nomesKpi = Object.keys(porPessoa);
+  const totalPessoas = nomesKpi.length;
+  const above100 = nomesKpi.filter(n => porPessoa[n].some(d => d.perc >= 100)).length;
+  const below80  = nomesKpi.filter(n => porPessoa[n].some(d => d.perc <  80)).length;
+  const pctAbove = totalPessoas ? (above100/totalPessoas*100).toFixed(0) : 0;
+
   const activeSectors = [...new Set(data.map(d=>d.setor))].length;
   const activeMes = [...new Set(data.map(d=>d.mes))].length;
   // ─── Last-3-months persistent KPIs (always from raw, filter-independent)
@@ -1155,19 +1167,19 @@ function buildKPIs(data) {
     <div class="kpi clickable" onclick="openKpiModal('aboveMeta')">
       <div class="kpi-label">Acima da Meta</div>
       <div class="kpi-value blue">${pctAbove}%</div>
-      <div class="kpi-sub">${above100} de ${data.length} pessoas</div>
+      <div class="kpi-sub">${above100} de ${totalPessoas} pessoas</div>
     </div>
     <div class="kpi">
       <div class="kpi-label">Top Performer</div>
       <div class="kpi-value green">${top ? top.perc.toFixed(1)+'%' : '—'}</div>
       <div class="kpi-sub">${top ? top.nome.split(' ')[0]+' · '+top.mes : ''}</div>
     </div>
-    <div class="kpi">
+    <div class="kpi clickable" onclick="openKpiModal('abaixoPeriodo')">
       <div class="kpi-label">Abaixo de 80%</div>
       <div class="kpi-value ${below80>0?'red':'green'}">${below80}</div>
-      <div class="kpi-sub">pessoa${below80!==1?'s':''} abaixo do esperado</div>
+      <div class="kpi-sub">de ${totalPessoas} pessoa${totalPessoas!==1?'s':''} no período</div>
     </div>
-    <div class="kpi">
+    <div class="kpi clickable" onclick="openKpiModal('setoresAtivos')">
       <div class="kpi-label">Setores Ativos</div>
       <div class="kpi-value blue">${activeSectors}</div>
       <div class="kpi-sub">${activeMes} mês${activeMes!==1?'es':''} no período</div>
@@ -1736,6 +1748,98 @@ document.getElementById('collab-select').addEventListener('change', e => buildCo
 
 // ─── MODAL POPUP ─────────────────────────────────────────────────────────────
 function openKpiModal(type) {
+  // Agrupa o período filtrado por pessoa e devolve também os meses presentes,
+  // para que os chips de cada linha fiquem alinhados na mesma ordem.
+  function agruparPeriodo() {
+    const filtData = getFiltered();
+    const mapa = {};
+    filtData.forEach(d => {
+      if (!mapa[d.nome]) mapa[d.nome] = { nome: d.nome, setor: d.setor, entries: [] };
+      mapa[d.nome].entries.push(d);
+    });
+    const meses = [...new Set(filtData.map(d => d.mes))]
+      .sort((a, b) => MONTHS.indexOf(a) - MONTHS.indexOf(b));
+    return { filtData, pessoas: Object.values(mapa), meses };
+  }
+
+  function chipsDe(p, meses) {
+    return meses.map(m => {
+      const e = p.entries.find(d => d.mes === m);
+      if (!e) return `<span class="modal-chip" style="opacity:0.3">—</span>`;
+      const cls = e.perc >= 100 ? 'green' : e.perc >= 80 ? 'yellow' : 'red';
+      return `<span class="modal-chip ${cls}">${e.perc.toFixed(0)}%</span>`;
+    }).join('');
+  }
+
+  function abrirModal(accent, titulo, contagem, listHtml) {
+    document.getElementById('modalBox').style.setProperty('--modal-accent', accent);
+    document.getElementById('modalTitle').textContent = titulo;
+    document.getElementById('modalCount').textContent = contagem;
+    document.getElementById('modalList').innerHTML = listHtml;
+    document.getElementById('kpiModal').classList.add('open');
+  }
+
+  // ── Abaixo de 80%: pessoas com ao menos um mês abaixo de 80% no período ─────
+  if (type === 'abaixoPeriodo') {
+    const { pessoas, meses } = agruparPeriodo();
+    const mediaDe = p => p.entries.reduce((s, d) => s + d.perc, 0) / p.entries.length;
+    // Ordena pelo que exige atenção primeiro: mais meses abaixo da meta e, em
+    // caso de empate, menor média. Quem aparece no topo é quem precisa de ação.
+    const matched = pessoas
+      .map(p => ({ ...p, quedas: p.entries.filter(d => d.perc < 80).length }))
+      .filter(p => p.quedas > 0)
+      .sort((a, b) => b.quedas - a.quedas || mediaDe(a) - mediaDe(b));
+
+    const listHtml = matched.length
+      ? matched.map(p => `<div class="modal-item">
+          <span class="modal-item-name">${p.nome}</span>
+          <span class="modal-item-sector">${p.setor} · ${p.quedas} mês${p.quedas !== 1 ? 'es' : ''} abaixo</span>
+          <span class="modal-item-months">${chipsDe(p, meses)}</span>
+        </div>`).join('')
+      : '<p style="color:#61DD75;padding:16px">✓ Nenhum colaborador abaixo de 80% no período selecionado.</p>';
+
+    abrirModal('#fc8181', '⚠️ Abaixo de 80% — período selecionado',
+      `${matched.length} colaborador${matched.length !== 1 ? 'es' : ''} · ${meses.join(', ')}`,
+      listHtml);
+    return;
+  }
+
+  // ── Setores Ativos: ranking das áreas no período filtrado ───────────────────
+  if (type === 'setoresAtivos') {
+    const { filtData, meses } = agruparPeriodo();
+    const mapa = {};
+    filtData.forEach(d => {
+      if (!mapa[d.setor]) mapa[d.setor] = { setor: d.setor, vals: [], nomes: new Set(), acima: new Set() };
+      mapa[d.setor].vals.push(d.perc);
+      mapa[d.setor].nomes.add(d.nome);
+      if (d.perc >= 100) mapa[d.setor].acima.add(d.nome);
+    });
+
+    const setores = Object.values(mapa)
+      .map(s => ({ ...s, media: avg(s.vals), head: s.nomes.size, nAcima: s.acima.size }))
+      .sort((a, b) => b.media - a.media);
+
+    const corDaMedia = m => m >= 100 ? 'green' : m >= 80 ? 'yellow' : 'red';
+
+    const listHtml = setores.length
+      ? setores.map(s => `<div class="modal-item">
+          <span class="modal-item-name">
+            <span style="width:9px;height:9px;border-radius:50%;background:${sectorColor(s.setor)};display:inline-block;margin-right:8px"></span>${s.setor}
+          </span>
+          <span class="modal-item-sector">${s.head} pessoa${s.head !== 1 ? 's' : ''}</span>
+          <span class="modal-item-months">
+            <span class="modal-chip ${corDaMedia(s.media)}">${s.media.toFixed(1)}%</span>
+            <span class="modal-chip" style="opacity:.75">${s.nAcima}/${s.head} acima</span>
+          </span>
+        </div>`).join('')
+      : '<p style="color:#aaa;padding:16px">Nenhum setor no período selecionado.</p>';
+
+    abrirModal('#38BDF8', '🏢 Setores ativos — período selecionado',
+      `${setores.length} setor${setores.length !== 1 ? 'es' : ''} · ${meses.join(', ')}`,
+      listHtml);
+    return;
+  }
+
   // ── Acima da Meta: mostra pessoas com perc ≥ 100% no período filtrado atual ──
   if (type === 'aboveMeta') {
     const filtData = getFiltered();
