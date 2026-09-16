@@ -353,7 +353,7 @@
   <div class="sidebar-footer">
     <span id="sidebar-period">Dados: Jan – Jun 2026</span><br>
     <span id="sidebar-update">Última atualiz.: Jul 2026</span><br>
-    <span style="color:#3a3a3a;font-size:10px;letter-spacing:.5px">v1.8.5</span>
+    <span style="color:#3a3a3a;font-size:10px;letter-spacing:.5px">v1.8.6</span>
   </div>
 </aside>
 <div class="main-wrap">
@@ -894,16 +894,37 @@ const tickColor = '#9a9a9a';
 Chart.register(ChartDataLabels);
 
 const SECTOR_PALETTE = ['#61DD75','#9B5DE5'];
+// O servidor entrega os setores já canonizados (Tech→Tecnologia, MKT→Marketing).
+// As grafias antigas seguem no mapa apenas como rede de segurança, caso o cache
+// do servidor ainda esteja servindo dados do formato anterior.
 const SECTOR_COLORS = {
-  'CS':         '#61DD75',
-  'Tech':       '#9B5DE5',
-  'Vendas':     '#38BDF8',
-  'Pré vendas': '#FB923C',
-  'Marketing':  '#F472B6',
-  'Financeiro': '#68D391',
-  'Conteúdo':   '#34D399',
-  'Produto':    '#FACC15',
+  'CS':             '#61DD75',
+  'Tecnologia':     '#9B5DE5',
+  'Tech':           '#9B5DE5',
+  'Vendas':         '#38BDF8',
+  'Pré vendas':     '#FB923C',
+  'Marketing':      '#F472B6',
+  'MKT':            '#F472B6',
+  'Financeiro':     '#68D391',
+  'Conteúdo':       '#34D399',
+  'Produto':        '#FACC15',
+  'Gente e Gestão': '#818CF8',
 };
+
+// Reserva de cores para setores que ainda não estão no mapa acima. Antes o
+// fallback era cinza (#9a9a9a), o que fazia um setor novo parecer desativado no
+// meio dos coloridos — foi exatamente o que aconteceu com "MKT" o ano todo.
+// A escolha é determinística (derivada do nome), então o mesmo setor mantém a
+// mesma cor entre gráficos e entre recarregamentos da página.
+const SECTOR_FALLBACK = ['#22D3EE','#FB7185','#A3E635','#FDBA74','#C084FC','#2DD4BF'];
+function sectorColor(s) {
+  if (SECTOR_COLORS[s]) return SECTOR_COLORS[s];
+  const name = String(s || '');
+  if (!name) return '#9a9a9a';
+  let h = 0;
+  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
+  return SECTOR_FALLBACK[h % SECTOR_FALLBACK.length];
+}
 
 const DL_BAR_V = { anchor:'end', align:'top', color:'#b5b5b5', font:{size:10,weight:'600'}, formatter:v=>v.toFixed(0)+'%', clamp:true };
 const DL_BAR_H = { anchor:'end', align:'right', color:'#b5b5b5', font:{size:10,weight:'600'}, formatter:v=>v.toFixed(0)+'%', clamp:true, padding:{right:4} };
@@ -1311,7 +1332,7 @@ let chartSectorLine;
 function buildChartSectorLine(data) {
   const sectors = [...new Set(raw.filter(d=>!excluded.has(d.nome)).map(d=>d.setor))].sort();
   const datasets = sectors.map((s, i) => {
-    const color = SECTOR_COLORS[s] || SECTOR_PALETTE[i % SECTOR_PALETTE.length];
+    const color = sectorColor(s);
     const monthVals = MONTHS.map(m => {
       const vals = data.filter(d => d.setor === s && d.mes === m).map(d => d.perc);
       return vals.length ? +avg(vals).toFixed(2) : null;
@@ -1413,7 +1434,7 @@ function buildMatrizSetores(data) {
     const avgPerf = avg(mAvgs);
     const consistency = 100 - stdev(mAvgs);
     const hc = info.names.size;
-    const color = SECTOR_COLORS[setor] || '#9a9a9a';
+    const color = sectorColor(setor);
     return {
       label: setor,
       data: [{ x: +consistency.toFixed(2), y: +avgPerf.toFixed(2), r: Math.max(7, Math.sqrt(hc) * 7.5) }],
@@ -1486,7 +1507,7 @@ function renderProjecaoLegend(sectorList) {
     wrap.appendChild(rst);
   }
   sectorList.forEach(setor => {
-    const color = SECTOR_COLORS[setor] || '#9a9a9a';
+    const color = sectorColor(setor);
     const isHidden = projecaoHidden.has(setor);
     const chip = document.createElement('button');
     chip.style.cssText = `display:flex;align-items:center;gap:6px;background:${isHidden?'transparent':color+'1a'};border:1.5px solid ${isHidden?'#3a3a3a':color};border-radius:20px;padding:4px 12px;cursor:pointer;font-size:12px;color:${isHidden?'#505050':'#e0e0e0'};transition:all .15s;`;
@@ -1534,7 +1555,7 @@ function buildProjecaoPreditiva() {
     const slope = den ? (n*sxy - sx*sy)/den : 0;
     const proj = +Math.max(10, Math.min(150, (sy - slope*sx)/n + slope*n)).toFixed(1);
 
-    const color = SECTOR_COLORS[setor] || '#9a9a9a';
+    const color = sectorColor(setor);
     const lastRealIdx = allAvgs.reduce((li,v,i) => v !== null ? i : li, -1);
 
     // Historical

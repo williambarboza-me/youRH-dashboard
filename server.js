@@ -56,6 +56,54 @@ function getSheets() {
   return google.sheets({ version: 'v4', auth });
 }
 
+// ─── NORMALIZAÇÃO DE SETORES ─────────────────────────────────────────────────
+// A planilha recebe o mesmo setor escrito de formas diferentes conforme quem
+// preenche (ex.: "Tech" em Jan/Abr e "Tecnologia" no resto do ano; "MKT" até
+// Julho e "Marketing" em Agosto). Sem unificar, o painel trata cada grafia como
+// um setor distinto — parte o time ao meio na Matriz de Setores, desenha linhas
+// quebradas na Projeção Preditiva e duplica opções no filtro.
+//
+// Fica em escopo de módulo de propósito: o parser da planilha E o filtro de
+// acesso por papel (filterByRole) precisam aplicar EXATAMENTE a mesma regra.
+// Se um gestor estiver cadastrado como "Tech" e os dados virarem "Tecnologia",
+// ele deixaria de enxergar o próprio time.
+const SETOR_ALIASES = {
+  'tech':           'Tecnologia',
+  'tecnologia':     'Tecnologia',
+  'ti':             'Tecnologia',
+  'mkt':            'Marketing',
+  'marketing':      'Marketing',
+  'cs':             'CS',
+  'customer success':'CS',
+  'vendas':         'Vendas',
+  'pre vendas':     'Pré vendas',
+  'pre-vendas':     'Pré vendas',
+  'prevendas':      'Pré vendas',
+  'conteudo':       'Conteúdo',
+  'produto':        'Produto',
+  'financeiro':     'Financeiro',
+  'gente e gestao': 'Gente e Gestão',
+  'gente & gestao': 'Gente e Gestão',
+  'gente':          'Gente e Gestão',
+  'rh':             'Gente e Gestão',
+};
+
+// Baixa a caixa, remove acentos e colapsa espaços — para que "Pré Vendas",
+// "pre vendas" e "PRÉ  VENDAS" caiam todos na mesma chave.
+const stripAccents = s => s.toLowerCase().trim()
+  .normalize('NFD')
+  .split('').filter(c => { const n = c.charCodeAt(0); return n < 0x0300 || n > 0x036F; })
+  .join('')
+  .replace(/\s+/g, ' ');
+
+// Setor desconhecido preserva a grafia original da planilha: é melhor aparecer
+// com o nome que o time escreveu do que ser descartado silenciosamente.
+function canonSetor(s) {
+  const raw = (s || '').trim();
+  if (!raw) return '';
+  return SETOR_ALIASES[stripAccents(raw)] || raw;
+}
+
 // ─── CACHE DADOS DE PERFORMANCE ───────────────────────────────────────────────
 let sheetsCache = { data: null, ts: 0 };
 
@@ -101,7 +149,7 @@ async function getRawData() {
     const percStr = (obj.perc || '0').replace('%', '').replace(',', '.');
     const perc = parseFloat(percStr);
     if (!obj.nome || !obj.mes || isNaN(perc)) return null;
-    return { mes: obj.mes, nome: obj.nome, setor: obj.setor || '', perc };
+    return { mes: obj.mes, nome: obj.nome, setor: canonSetor(obj.setor), perc };
   }).filter(Boolean);
 
   sheetsCache = { data: parsed, ts: now };
@@ -246,12 +294,14 @@ function filterByRole(data, user) {
   switch (user.role) {
     case 'rh_admin':
     case 'direcao':    return data;
-    case 'gestor':     return data.filter(d => d.setor === user.setor);
+    // canonSetor nos dois lados: o cadastro do usuário pode dizer "Tech" e os
+    // dados já vêm como "Tecnologia". Sem isso o gestor perderia o próprio time.
+    case 'gestor':     return data.filter(d => d.setor === canonSetor(user.setor));
     case 'colaborador':return data.filter(d => d.nome === user.nome);
     case 'lider': {
       // Lider vê dados completos da(s) sua(s) área(s); demais setores chegam
       // anonimizados (nome='__agg__') para permitir comparações agregadas.
-      const setores = (user.setor || '').split(',').map(s => s.trim()).filter(Boolean);
+      const setores = (user.setor || '').split(',').map(s => canonSetor(s)).filter(Boolean);
       return data.map(d =>
         setores.includes(d.setor) ? d : { mes: d.mes, setor: d.setor, perc: d.perc, nome: '__agg__' }
       );
