@@ -353,7 +353,7 @@
   <div class="sidebar-footer">
     <span id="sidebar-period">Dados: Jan – Jun 2026</span><br>
     <span id="sidebar-update">Última atualiz.: Jul 2026</span><br>
-    <span style="color:#3a3a3a;font-size:10px;letter-spacing:.5px">v1.8.8</span>
+    <span style="color:#3a3a3a;font-size:10px;letter-spacing:.5px">v1.8.9</span>
   </div>
 </aside>
 <div class="main-wrap">
@@ -2197,6 +2197,13 @@ function buildSetorEvol() {
   const folga = (yMax - yMin) * 0.08;
   yMin = Math.max(0, yMin - folga);
   yMax = yMax + folga;
+  // Arredonda para múltiplos de 5. Ao fixar min/max explicitamente o Chart.js
+  // usa esses valores como marcação do eixo — sem arredondar, apareciam rótulos
+  // como "29.848%" e "162.55200000000002%" (o rabicho é erro de ponto flutuante
+  // do JavaScript, não dado). Múltiplos de 5 também fazem o Chart.js escolher
+  // intervalos limpos entre os extremos.
+  yMin = Math.floor(yMin / 5) * 5;
+  yMax = Math.ceil(yMax / 5) * 5;
 
   // Marco fixo da meta. Desenhado fino e discreto, atrás das demais séries, para
   // ser lido como referência do gráfico e não confundido com uma área.
@@ -2238,7 +2245,9 @@ function buildSetorEvol() {
         x: { ticks: { color: tickColor }, grid: { color: gridColor } },
         y: {
           min: yMin, max: yMax,
-          ticks: { color: tickColor, callback: v => v + '%' },
+          // Math.round como rede de segurança: nenhum rótulo com casa decimal
+          // ou rabicho de ponto flutuante chega à tela.
+          ticks: { color: tickColor, callback: v => Math.round(v) + '%' },
           grid: { color: gridColor }
         }
       }
