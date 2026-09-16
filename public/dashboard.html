@@ -353,7 +353,7 @@
   <div class="sidebar-footer">
     <span id="sidebar-period">Dados: Jan – Jun 2026</span><br>
     <span id="sidebar-update">Última atualiz.: Jul 2026</span><br>
-    <span style="color:#3a3a3a;font-size:10px;letter-spacing:.5px">v1.9.1</span>
+    <span style="color:#3a3a3a;font-size:10px;letter-spacing:.5px">v1.9.2</span>
   </div>
 </aside>
 <div class="main-wrap">
@@ -480,7 +480,7 @@
   <div class="section-title">Detalhamento Individual</div>
   <div class="table-card">
     <div class="table-header">
-      <h3>Todos os registros</h3>
+      <h3>Cada colaborador, mês a mês</h3>
       <input type="text" id="search" placeholder="Buscar por nome...">
   <div class="filter-group exclusion-group">
     <label>Excluir colaborador</label>
@@ -624,7 +624,7 @@
       <div class="hm-tab" id="hm-tab-setor" onclick="switchHmTab('setor')">🏢 Setores</div>
     </div>
     <div id="hm-subtitle" style="font-size:0.72rem;color:#6b6b6b;margin-bottom:12px">
-      Todos os colaboradores ordenados pela média decrescente · 6 meses completos
+      Todos os colaboradores ordenados pela média decrescente
     </div>
     <div class="heatmap-scroll" id="heatmap-wrap"></div>
     <div class="hm-legend">
@@ -900,6 +900,28 @@ const gridColor = '#1c1c1c';
 const tickColor = '#9a9a9a';
 Chart.register(ChartDataLabels);
 
+// ─── CLASSIFICAÇÃO POR PESSOA ────────────────────────────────────────────────
+// Fonte única de verdade para "quantas pessoas estão acima/abaixo". Cada pessoa
+// é classificada pela MÉDIA dela no período filtrado, então cai em exatamente
+// uma faixa: as contagens somam o headcount real e os indicadores concordam
+// entre si. Contar registros (pessoa × mês) fazia a mesma pessoa aparecer em
+// várias faixas ao mesmo tempo, e a régua "ao menos um mês acima" era fraca
+// demais — em 8 meses quase todo mundo tem um mês bom, o que inflava o KPI.
+function mediaPorPessoa(data) {
+  const mapa = {};
+  data.forEach(d => { (mapa[d.nome] = mapa[d.nome] || []).push(d); });
+  return Object.keys(mapa).map(nome => {
+    const entries = mapa[nome];
+    return {
+      nome,
+      setor: entries[entries.length - 1].setor,
+      entries,
+      media: avg(entries.map(d => d.perc)),
+      meses: entries.length
+    };
+  });
+}
+
 // ─── VALORES SUSPEITOS ───────────────────────────────────────────────────────
 // Sinaliza registros que quase certamente são erro de cadastro, SEM alterar
 // nenhum cálculo: o painel não maquia nem esconde dado, apenas torna a anomalia
@@ -1038,13 +1060,17 @@ function buildChartDist(data) {
     { label:'🟠 80% a 89%',    min:80,  max:90,      color:'#ed8936' },
     { label:'🔴 Menos de 80%', min:0,   max:80,      color:'#fc8181' },
   ];
+  // Cada pessoa cai em exatamente uma faixa (pela média dela), então as fatias
+  // somam o headcount real do período — antes somavam registros e a mesma
+  // pessoa aparecia em várias faixas.
+  const pessoasDist = mediaPorPessoa(data);
   destroyChart(chartDist);
   chartDist = new Chart(document.getElementById('chartDist'), {
     type: 'doughnut',
     data: {
       labels: ranges.map(r=>r.label),
       datasets: [{
-        data: ranges.map(r=>data.filter(d=>d.perc>=r.min&&d.perc<r.max).length),
+        data: ranges.map(r=>pessoasDist.filter(p=>p.media>=r.min&&p.media<r.max).length),
         backgroundColor: ranges.map(r=>r.color),
         borderColor: '#161616', borderWidth: 3, hoverOffset: 8,
       }]
@@ -1144,12 +1170,10 @@ function buildKPIs(data) {
   // empresa de 47 pessoas. Além de impossível, divergia dos popups, que sempre
   // listaram pessoas. Um colaborador abaixo da meta em três meses é uma pessoa
   // em dificuldade, não três.
-  const porPessoa = {};
-  data.forEach(d => { (porPessoa[d.nome] = porPessoa[d.nome] || []).push(d); });
-  const nomesKpi = Object.keys(porPessoa);
-  const totalPessoas = nomesKpi.length;
-  const above100 = nomesKpi.filter(n => porPessoa[n].some(d => d.perc >= 100)).length;
-  const below80  = nomesKpi.filter(n => porPessoa[n].some(d => d.perc <  80)).length;
+  const pessoasKpi = mediaPorPessoa(data);
+  const totalPessoas = pessoasKpi.length;
+  const above100 = pessoasKpi.filter(p => p.media >= 100).length;
+  const below80  = pessoasKpi.filter(p => p.media <  80).length;
   const pctAbove = totalPessoas ? (above100/totalPessoas*100).toFixed(0) : 0;
 
   const activeSectors = [...new Set(data.map(d=>d.setor))].length;
@@ -1164,17 +1188,12 @@ function buildKPIs(data) {
   // recém-chegado com um único registro assumam o card. Sem o mínimo, aquela
   // mesma ex-colaboradora ainda lideraria: média de 134,1% em 3 meses.
   const MIN_MESES_TOP = Math.min(3, activeMes || 1);
-  const ativosTop = getActiveNames(); // quem tem registro no último mês da base
+  const ativosTop = getActiveNames(); // quem aparece no último mês da base
   const top = (() => {
-    const candidatos = nomesKpi
-      .filter(n => ativosTop.has(n))
-      .map(n => {
-        const e = porPessoa[n];
-        return { nome: n, setor: e[e.length-1].setor, perc: avg(e.map(d=>d.perc)), meses: e.length };
-      })
-      .filter(c => c.meses >= MIN_MESES_TOP);
+    const candidatos = pessoasKpi
+      .filter(p => ativosTop.has(p.nome) && p.meses >= MIN_MESES_TOP);
     if (!candidatos.length) return null;
-    return candidatos.sort((a,b) => b.perc - a.perc)[0];
+    return candidatos.sort((a,b) => b.media - a.media)[0];
   })();
   // ─── Last-3-months persistent KPIs (always from raw, filter-independent)
   const last3 = MONTHS.slice(-3);
@@ -1201,7 +1220,7 @@ function buildKPIs(data) {
     <div class="kpi">
       <div class="kpi-label">Média Geral</div>
       <div class="kpi-value ${avgClass}">${totalAvg.toFixed(1)}%</div>
-      <div class="kpi-sub">${data.length} registros</div>
+      <div class="kpi-sub">${totalPessoas} pessoa${totalPessoas!==1?'s':''} · ${activeMes} mês${activeMes!==1?'es':''}</div>
     </div>
     <div class="kpi clickable" onclick="openKpiModal('aboveMeta')">
       <div class="kpi-label">Acima da Meta</div>
@@ -1210,7 +1229,7 @@ function buildKPIs(data) {
     </div>
     <div class="kpi">
       <div class="kpi-label">Top Performer</div>
-      <div class="kpi-value green">${top ? top.perc.toFixed(1)+'%' : '—'}</div>
+      <div class="kpi-value green">${top ? top.media.toFixed(1)+'%' : '—'}</div>
       <div class="kpi-sub">${top ? top.nome.split(' ')[0]+' · média de '+top.meses+' '+(top.meses!==1?'meses':'mês') : 'sem colaborador ativo no período'}</div>
     </div>
     <div class="kpi clickable" onclick="openKpiModal('abaixoPeriodo')">
@@ -2444,9 +2463,13 @@ function buildSetoresSection(data) {
   });
   const sects = Object.keys(sectorMap).sort((a, b) => avg(sectorMap[b].vals) - avg(sectorMap[a].vals));
 
+  // Percentual de PESSOAS do setor cuja média no período bate a meta — o
+  // rótulo diz "Equipe", então a conta precisa ser sobre gente, não registros.
+  const pessoasPorSetor = {};
+  mediaPorPessoa(data).forEach(p => { (pessoasPorSetor[p.setor] = pessoasPorSetor[p.setor] || []).push(p); });
   const pctAbove = sects.map(s => {
-    const v = sectorMap[s].vals;
-    return +(v.filter(x => x >= 100).length / v.length * 100).toFixed(1);
+    const ps = pessoasPorSetor[s] || [];
+    return ps.length ? +(ps.filter(p => p.media >= 100).length / ps.length * 100).toFixed(1) : 0;
   });
 
   if (chartSectorAbove) chartSectorAbove.destroy();
@@ -2491,8 +2514,11 @@ function buildSetoresSection(data) {
     sects.map(s => {
       const v = sectorMap[s].vals;
       const avgV = avg(v);
-      const abv = (v.filter(x => x >= 100).length / v.length * 100).toFixed(0);
-      const blw = (v.filter(x => x < 80).length / v.length * 100).toFixed(0);
+      // As colunas de percentual ficam ao lado da coluna "Colaboradores", entao
+      // precisam falar de gente: classificam cada pessoa pela media dela.
+      const ps = pessoasPorSetor[s] || [];
+      const abv = ps.length ? (ps.filter(p => p.media >= 100).length / ps.length * 100).toFixed(0) : '0';
+      const blw = ps.length ? (ps.filter(p => p.media <  80).length / ps.length * 100).toFixed(0) : '0';
       const best = Math.max(...v);
       const c = percColor(avgV);
       return '<tr>' +
@@ -2517,25 +2543,31 @@ function buildEmpresaSection() {
   const diff = q2a - q1a;
   const totalHead = [...new Set(ar.map(d => d.nome))].length;
   const overallAvg = avg(ar.map(d => d.perc));
-  const pctA = (ar.filter(d => d.perc >= 100).length / ar.length * 100).toFixed(0);
+  // Percentual de PESSOAS que batem a meta pela média do período — mesma régua
+  // usada na Visão Geral e na seção Setores, para que os números concordem.
+  const pessoasEmp = mediaPorPessoa(ar);
+  const pctA = pessoasEmp.length
+    ? (pessoasEmp.filter(p => p.media >= 100).length / pessoasEmp.length * 100).toFixed(0)
+    : '0';
+  const periodoLabel = MONTHS.length ? MONTHS[0] + ' – ' + MONTHS[MONTHS.length-1] + ' 2026' : '—';
 
   const cls = v => v >= 100 ? 'green' : v >= 80 ? 'yellow' : 'red';
   document.getElementById('empresa-kpis').innerHTML =
     '<div class="kpi"><div class="kpi-label">Total de Colaboradores</div>' +
       '<div class="kpi-value blue">' + totalHead + '</div>' +
-      '<div class="kpi-sub">ativos no semestre</div></div>' +
-    '<div class="kpi"><div class="kpi-label">Média Semestral</div>' +
+      '<div class="kpi-sub">no período</div></div>' +
+    '<div class="kpi"><div class="kpi-label">Média do Período</div>' +
       '<div class="kpi-value ' + cls(overallAvg) + '">' + overallAvg.toFixed(1) + '%</div>' +
-      '<div class="kpi-sub">Jan – Jun 2026</div></div>' +
+      '<div class="kpi-sub">' + periodoLabel + '</div></div>' +
     '<div class="kpi"><div class="kpi-label">Média Q1</div>' +
       '<div class="kpi-value ' + cls(q1a) + '">' + q1a.toFixed(1) + '%</div>' +
       '<div class="kpi-sub">Jan · Fev · Mar</div></div>' +
     '<div class="kpi"><div class="kpi-label">Média Q2</div>' +
       '<div class="kpi-value ' + cls(q2a) + '">' + q2a.toFixed(1) + '%</div>' +
       '<div class="kpi-sub">Abr · Mai · Jun</div></div>' +
-    '<div class="kpi"><div class="kpi-label">Acima da Meta (Semestre)</div>' +
+    '<div class="kpi"><div class="kpi-label">Acima da Meta (Período)</div>' +
       '<div class="kpi-value ' + (Number(pctA) >= 60 ? 'green' : 'yellow') + '">' + pctA + '%</div>' +
-      '<div class="kpi-sub">de todos os registros</div></div>' +
+      '<div class="kpi-sub">da equipe, pela média</div></div>' +
     '<div class="kpi"><div class="kpi-label">Variação Q1→Q2</div>' +
       '<div class="kpi-value ' + (diff >= 0 ? 'green' : 'red') + '">' + (diff >= 0 ? '+' : '') + diff.toFixed(1) + 'pp</div>' +
       '<div class="kpi-sub">evolução entre trimestres</div></div>';
@@ -2712,11 +2744,11 @@ function buildHeatmapSection() {
 
   if (hmActiveTab === 'colab') {
     document.getElementById('hm-subtitle').textContent =
-      'Todos os colaboradores ordenados pela média decrescente · 6 meses completos';
+      'Todos os colaboradores ordenados pela média decrescente';
     buildHeatmapColab(activeRaw);
   } else {
     document.getElementById('hm-subtitle').textContent =
-      'Média de performance por setor × mês · 6 meses completos';
+      'Média de performance por setor × mês · ' + MONTHS.length + ' meses';
     buildHeatmapSetor(activeRaw);
   }
 }
