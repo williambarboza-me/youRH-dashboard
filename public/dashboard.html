@@ -353,7 +353,7 @@
   <div class="sidebar-footer">
     <span id="sidebar-period">Dados: Jan – Jun 2026</span><br>
     <span id="sidebar-update">Última atualiz.: Jul 2026</span><br>
-    <span style="color:#3a3a3a;font-size:10px;letter-spacing:.5px">v1.8.7</span>
+    <span style="color:#3a3a3a;font-size:10px;letter-spacing:.5px">v1.8.8</span>
   </div>
 </aside>
 <div class="main-wrap">
@@ -2179,6 +2179,40 @@ function buildSetorEvol() {
     });
   }
 
+  // ─── ESCALA VERTICAL ESTÁVEL ───────────────────────────────────────────────
+  // Por padrão o Chart.js reescala o eixo Y para caber exatamente os dados
+  // visíveis. Ao trocar de área o "chão" do gráfico se move, e duas áreas com
+  // variações muito diferentes passam a ocupar a mesma altura na tela: uma área
+  // que oscilou 13 pontos parece ter oscilado igual a outra que oscilou 23.
+  // Isso inviabiliza justamente a comparação entre áreas que o gráfico existe
+  // para permitir. Travar o eixo global (50%–155%) resolveria, mas achataria
+  // todas as linhas. A saída é garantir uma amplitude mínima e ancorar a meta.
+  const AMPLITUDE_MIN = 30; // pontos percentuais
+  const valores = datasets.flatMap(ds => ds.data).filter(v => v !== null && v !== undefined);
+  // O 100 entra sempre: mantém a linha da meta visível e serve de âncora fixa.
+  let yMin = Math.min(...valores, 100);
+  let yMax = Math.max(...valores, 100);
+  const faltando = AMPLITUDE_MIN - (yMax - yMin);
+  if (faltando > 0) { yMin -= faltando / 2; yMax += faltando / 2; }
+  const folga = (yMax - yMin) * 0.08;
+  yMin = Math.max(0, yMin - folga);
+  yMax = yMax + folga;
+
+  // Marco fixo da meta. Desenhado fino e discreto, atrás das demais séries, para
+  // ser lido como referência do gráfico e não confundido com uma área.
+  datasets.push({
+    label: 'Meta (100%)',
+    data: MONTHS.map(() => 100),
+    borderColor: 'rgba(97,221,117,0.30)',
+    backgroundColor: 'transparent',
+    borderWidth: 1.5,
+    pointRadius: 0,
+    pointHoverRadius: 0,
+    tension: 0,
+    order: 99,
+    datalabels: { display: false }
+  });
+
   if (chartSetorEvol) chartSetorEvol.destroy();
   chartSetorEvol = new Chart(canvas, {
     type: 'line',
@@ -2190,6 +2224,9 @@ function buildSetorEvol() {
       plugins: {
         legend: { display: false }, // os chips acima do gráfico fazem esse papel
         tooltip: {
+          // A meta é uma régua, não um dado — repetir "100%" em todo tooltip
+          // só adicionaria ruído.
+          filter: item => item.dataset.label !== 'Meta (100%)',
           callbacks: {
             label: ctx => ctx.parsed.y === null
               ? ''
@@ -2199,7 +2236,11 @@ function buildSetorEvol() {
       },
       scales: {
         x: { ticks: { color: tickColor }, grid: { color: gridColor } },
-        y: { ticks: { color: tickColor, callback: v => v + '%' }, grid: { color: gridColor } }
+        y: {
+          min: yMin, max: yMax,
+          ticks: { color: tickColor, callback: v => v + '%' },
+          grid: { color: gridColor }
+        }
       }
     }
   });
