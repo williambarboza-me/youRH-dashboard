@@ -353,7 +353,7 @@
   <div class="sidebar-footer">
     <span id="sidebar-period">Dados: Jan – Jun 2026</span><br>
     <span id="sidebar-update">Última atualiz.: Jul 2026</span><br>
-    <span style="color:#3a3a3a;font-size:10px;letter-spacing:.5px">v1.9.5</span>
+    <span style="color:#3a3a3a;font-size:10px;letter-spacing:.5px">v1.9.6</span>
   </div>
 </aside>
 <div class="main-wrap">
@@ -367,6 +367,7 @@
       <div style="font-size:0.8rem;color:#e2e8f0;" id="user-nome"></div>
       <div style="font-size:0.7rem;color:#6b6b6b;" id="user-role"></div>
     </div>
+    <button id="btn-refresh" class="nav-admin-only" onclick="refreshDados()" style="display:none;background:#1c1c1c;border:1px solid #2e2e2e;color:#61DD75;padding:6px 14px;border-radius:6px;font-size:0.75rem;cursor:pointer;font-family:inherit;" title="Busca os dados mais recentes da planilha agora, sem esperar o cache de 5 minutos">↻ Atualizar dados</button>
     <button onclick="logout()" style="background:#1c1c1c;border:1px solid #2e2e2e;color:#9a9a9a;padding:6px 14px;border-radius:6px;font-size:0.75rem;cursor:pointer;font-family:inherit;">Sair</button>
   </div>
 </header>
@@ -2077,6 +2078,37 @@ function openKpiModal(type) {
 }
 function closeModal() {
   document.getElementById('kpiModal').classList.remove('open');
+}
+
+// ─── ATUALIZAR DADOS DA PLANILHA ─────────────────────────────────────────────
+// O servidor guarda os dados da planilha por 5 minutos (CACHE_TTL_MS) para não
+// bater na API do Google a cada carregamento. Isso significa que uma correção
+// feita na planilha demora até 5 minutos para aparecer. A rota /api/refresh já
+// existia para zerar esse cache, mas não havia nada na interface que a chamasse
+// — quem editava a planilha só podia esperar, sem saber quanto.
+// A rota é restrita a rh_admin no servidor; o botão segue a mesma regra.
+async function refreshDados() {
+  const btn = document.getElementById('btn-refresh');
+  const textoOriginal = btn.textContent;
+  btn.disabled = true;
+  btn.style.opacity = '.6';
+  btn.textContent = '↻ Atualizando...';
+  try {
+    const r = await fetch('/api/refresh', { method: 'POST' });
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'Falha ao atualizar');
+    btn.textContent = '✓ Recarregando...';
+    // Recarrega a página: os dados são injetados no HTML pelo servidor, então
+    // limpar o cache só tem efeito visível depois de buscar a página de novo.
+    location.reload();
+  } catch (e) {
+    btn.textContent = '✕ Erro';
+    btn.title = e.message;
+    setTimeout(() => {
+      btn.textContent = textoOriginal;
+      btn.disabled = false;
+      btn.style.opacity = '1';
+    }, 2500);
+  }
 }
 
 // ─── NAVIGATION ───────────────────────────────────────────────────────────────
