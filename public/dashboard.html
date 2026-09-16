@@ -353,7 +353,7 @@
   <div class="sidebar-footer">
     <span id="sidebar-period">Dados: Jan – Jun 2026</span><br>
     <span id="sidebar-update">Última atualiz.: Jul 2026</span><br>
-    <span style="color:#3a3a3a;font-size:10px;letter-spacing:.5px">v1.9.3</span>
+    <span style="color:#3a3a3a;font-size:10px;letter-spacing:.5px">v1.9.4</span>
   </div>
 </aside>
 <div class="main-wrap">
@@ -1177,7 +1177,14 @@ function buildKPIs(data) {
   const pctAbove = totalPessoas ? (above100/totalPessoas*100).toFixed(0) : 0;
 
   const activeSectors = [...new Set(data.map(d=>d.setor))].length;
-  const activeMes = [...new Set(data.map(d=>d.mes))].length;
+  const mesesPeriodo = [...new Set(data.map(d=>d.mes))]
+    .sort((a,b) => MONTHS.indexOf(a) - MONTHS.indexOf(b));
+  const activeMes = mesesPeriodo.length;
+  // Uma média sem período não diz nada: 93,9% de janeiro a agosto e 93,9% de um
+  // mês isolado são leituras muito diferentes. Acompanha o filtro.
+  const periodoTxt = !activeMes ? '—'
+    : activeMes === 1 ? mesesPeriodo[0]
+    : mesesPeriodo[0] + ' a ' + mesesPeriodo[activeMes - 1];
 
   // ─── TOP PERFORMER: MÉDIA, ENTRE ATIVOS, COM MÍNIMO DE MESES ───────────────
   // O critério anterior era o maior registro isolado do período. Bastava um mês
@@ -1220,7 +1227,7 @@ function buildKPIs(data) {
     <div class="kpi">
       <div class="kpi-label">Média Geral</div>
       <div class="kpi-value ${avgClass}">${totalAvg.toFixed(1)}%</div>
-      <div class="kpi-sub">${totalPessoas} pessoa${totalPessoas!==1?'s':''} · ${activeMes} mês${activeMes!==1?'es':''}</div>
+      <div class="kpi-sub">${periodoTxt}</div>
     </div>
     <div class="kpi clickable" onclick="openKpiModal('aboveMeta')">
       <div class="kpi-label">Acima da Meta</div>
@@ -1240,7 +1247,7 @@ function buildKPIs(data) {
     <div class="kpi clickable" onclick="openKpiModal('setoresAtivos')">
       <div class="kpi-label">Setores Ativos</div>
       <div class="kpi-value blue">${activeSectors}</div>
-      <div class="kpi-sub">${activeMes} mês${activeMes!==1?'es':''} no período</div>
+      <div class="kpi-sub">${activeMes} ${activeMes!==1?'meses':'mês'} no período</div>
     </div>
     <div class="kpi clickable" onclick="openKpiModal('below80')">
       <div class="kpi-label">⚠️ Abaixo de 80% — últ. 2 meses</div>
@@ -1870,7 +1877,7 @@ function openKpiModal(type) {
     const listHtml = matched.length
       ? matched.map(p => `<div class="modal-item">
           <span class="modal-item-name">${p.nome}</span>
-          <span class="modal-item-sector">${p.setor} · ${p.quedas} mês${p.quedas !== 1 ? 'es' : ''} abaixo</span>
+          <span class="modal-item-sector">${p.setor} · ${p.quedas} ${p.quedas !== 1 ? 'meses' : 'mês'} abaixo</span>
           <span class="modal-item-months">${chipsDe(p, meses)}</span>
         </div>`).join('')
       : '<p style="color:#61DD75;padding:16px">✓ Nenhum colaborador abaixo de 80% no período selecionado.</p>';
