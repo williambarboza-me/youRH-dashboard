@@ -353,7 +353,7 @@
   <div class="sidebar-footer">
     <span id="sidebar-period">Dados: Jan – Jun 2026</span><br>
     <span id="sidebar-update">Última atualiz.: Jul 2026</span><br>
-    <span style="color:#3a3a3a;font-size:10px;letter-spacing:.5px">v1.8.6</span>
+    <span style="color:#3a3a3a;font-size:10px;letter-spacing:.5px">v1.8.7</span>
   </div>
 </aside>
 <div class="main-wrap">
@@ -568,6 +568,13 @@
       <canvas id="chartSectorHead"></canvas>
     </div>
   </div>
+  <div class="chart-card" style="margin-bottom:20px">
+    <h3>Evolução Mês a Mês por Setor</h3>
+    <p class="note">Todas as áreas por padrão · Clique em uma área para isolar e comparar com a média da empresa</p>
+    <div id="setor-evol-legend" style="display:flex;flex-wrap:wrap;gap:8px;margin:10px 0 14px"></div>
+    <canvas id="chartSetorEvol" height="150"></canvas>
+  </div>
+
   <div class="chart-card">
     <h3>Comparativo de Setores — Período Selecionado</h3>
     <div id="sector-table-wrap"></div>
@@ -893,6 +900,7 @@ const gridColor = '#1c1c1c';
 const tickColor = '#9a9a9a';
 Chart.register(ChartDataLabels);
 
+// Mantido apenas por compatibilidade — a cor de setor agora vem de sectorColor().
 const SECTOR_PALETTE = ['#61DD75','#9B5DE5'];
 // O servidor entrega os setores já canonizados (Tech→Tecnologia, MKT→Marketing).
 // As grafias antigas seguem no mapa apenas como rede de segurança, caso o cache
@@ -970,7 +978,7 @@ function buildChartSectors(data) {
   destroyChart(chartSectors);
   chartSectors = new Chart(document.getElementById('chartSectors'), {
     type: 'bar',
-    data: { labels, datasets:[{ data:vals, backgroundColor:labels.map((_,i)=>SECTOR_PALETTE[i%SECTOR_PALETTE.length]), borderRadius:6, borderSkipped:false, datalabels:DL_BAR_H }] },
+    data: { labels, datasets:[{ data:vals, backgroundColor:labels.map(s=>sectorColor(s)), borderRadius:6, borderSkipped:false, datalabels:DL_BAR_H }] },
     options: {
       indexAxis: 'y', responsive: true, layout: { padding: { right: 40 } },
       plugins: { legend:{display:false}, datalabels:DL_BAR_H, tooltip:{callbacks:{label:ctx=>` ${ctx.parsed.x.toFixed(1)}%`}} },
@@ -2100,7 +2108,140 @@ function buildColaboradoresSection(data) {
 
 // ─── SETORES SECTION ──────────────────────────────────────────────────────────
 let chartSectorAbove, chartSectorHead;
+// ─── EVOLUÇÃO MÊS A MÊS POR SETOR ────────────────────────────────────────────
+// Diferente da Projeção Preditiva (que existe para prever o próximo mês), este
+// gráfico existe para responder "esta área está puxando a empresa pra cima ou
+// pra baixo?". Por isso a média da empresa entra como referência tracejada —
+// mas só quando UMA área está isolada: com 9 linhas na tela ela só poluiria.
+let chartSetorEvol = null;
+let setorEvolFocus = null; // null = todas as áreas
+
+function buildSetorEvol() {
+  const canvas = document.getElementById('chartSetorEvol');
+  if (!canvas) return;
+
+  // Ignora o filtro de mês de propósito (mesma convenção das demais séries
+  // temporais do painel): um gráfico de tendência preso a um único mês não
+  // mostra tendência nenhuma. Exclusões e o filtro de ativos continuam valendo.
+  const activeNames = isActiveFilterOn() ? getActiveNames() : null;
+  const base = raw.filter(d =>
+    !excluded.has(d.nome) && (!activeNames || activeNames.has(d.nome))
+  );
+
+  const sectorList = [...new Set(base.map(d => d.setor))].filter(Boolean).sort();
+
+  const mediaDe = rows => rows.length ? +avg(rows.map(d => d.perc)).toFixed(1) : null;
+  const serieSetor  = setor => MONTHS.map(m => mediaDe(base.filter(d => d.mes === m && d.setor === setor)));
+  const serieEmpresa = () => MONTHS.map(m => mediaDe(base.filter(d => d.mes === m)));
+
+  // Se a área isolada sumiu do recorte atual, volta para "todas" em vez de
+  // desenhar um gráfico vazio sem explicação.
+  const focus = setorEvolFocus && sectorList.includes(setorEvolFocus) ? setorEvolFocus : null;
+  setorEvolFocus = focus;
+
+  const visiveis = focus ? [focus] : sectorList;
+
+  const datasets = visiveis.map(setor => {
+    const cor = sectorColor(setor);
+    return {
+      label: setor,
+      data: serieSetor(setor),
+      borderColor: cor,
+      backgroundColor: cor,
+      pointBackgroundColor: cor,
+      pointBorderColor: '#0A0A0A',
+      pointBorderWidth: 1.5,
+      borderWidth: focus ? 3 : 2,
+      pointRadius: focus ? 4.5 : 2.5,
+      pointHoverRadius: 6,
+      tension: 0.35,
+      spanGaps: true,
+      datalabels: focus
+        ? { anchor:'end', align:'top', color:cor, font:{size:10,weight:'700'},
+            formatter:v => v === null ? '' : v.toFixed(0)+'%', clamp:true, offset:4 }
+        : { display: false }
+    };
+  });
+
+  if (focus) {
+    datasets.push({
+      label: 'Média da empresa',
+      data: serieEmpresa(),
+      borderColor: '#8a8a8a',
+      backgroundColor: '#8a8a8a',
+      borderDash: [6, 5],
+      borderWidth: 2,
+      pointRadius: 0,
+      pointHoverRadius: 5,
+      tension: 0.35,
+      spanGaps: true,
+      datalabels: { display: false }
+    });
+  }
+
+  if (chartSetorEvol) chartSetorEvol.destroy();
+  chartSetorEvol = new Chart(canvas, {
+    type: 'line',
+    data: { labels: MONTHS.map(m => m.slice(0, 3)), datasets },
+    options: {
+      responsive: true, aspectRatio: 2.4,
+      interaction: { mode: 'index', intersect: false },
+      layout: { padding: { top: 18 } },
+      plugins: {
+        legend: { display: false }, // os chips acima do gráfico fazem esse papel
+        tooltip: {
+          callbacks: {
+            label: ctx => ctx.parsed.y === null
+              ? ''
+              : ` ${ctx.dataset.label}: ${ctx.parsed.y.toFixed(1)}%`
+          }
+        }
+      },
+      scales: {
+        x: { ticks: { color: tickColor }, grid: { color: gridColor } },
+        y: { ticks: { color: tickColor, callback: v => v + '%' }, grid: { color: gridColor } }
+      }
+    }
+  });
+
+  renderSetorEvolLegend(sectorList);
+}
+
+function renderSetorEvolLegend(sectorList) {
+  const wrap = document.getElementById('setor-evol-legend');
+  if (!wrap) return;
+  wrap.innerHTML = '';
+  const focus = setorEvolFocus;
+
+  const pill = (label, dotColor, ativo, onClick) => {
+    const b = document.createElement('button');
+    const borda = ativo ? (dotColor || '#61DD75') : '#3a3a3a';
+    const fundo = ativo ? (dotColor || '#61DD75') + '22' : 'transparent';
+    const texto = ativo ? '#e0e0e0' : '#6a6a6a';
+    b.style.cssText = `display:flex;align-items:center;gap:6px;background:${fundo};`
+      + `border:1.5px solid ${borda};border-radius:20px;padding:4px 12px;cursor:pointer;`
+      + `font-size:12px;color:${texto};font-family:inherit;transition:all .15s;`;
+    b.innerHTML = dotColor
+      ? `<span style="width:9px;height:9px;border-radius:50%;background:${ativo?dotColor:'#3a3a3a'};display:inline-block;flex-shrink:0"></span>${label}`
+      : label;
+    b.onclick = onClick;
+    wrap.appendChild(b);
+  };
+
+  pill('Todas as áreas', null, !focus, () => { setorEvolFocus = null; buildSetorEvol(); });
+
+  sectorList.forEach(setor => {
+    pill(setor, sectorColor(setor), focus === setor, () => {
+      // Clicar na área já isolada volta para a visão geral — evita que o
+      // usuário fique preso num setor sem saber como sair.
+      setorEvolFocus = (focus === setor) ? null : setor;
+      buildSetorEvol();
+    });
+  });
+}
+
 function buildSetoresSection(data) {
+  buildSetorEvol();
   const sectorMap = {};
   data.forEach(d => {
     if (!sectorMap[d.setor]) sectorMap[d.setor] = { vals: [], names: new Set() };
@@ -2117,7 +2258,9 @@ function buildSetoresSection(data) {
   if (chartSectorAbove) chartSectorAbove.destroy();
   chartSectorAbove = new Chart(document.getElementById('chartSectorAbove'), {
     type: 'bar',
-    data: { labels: sects, datasets: [{ data: pctAbove, backgroundColor: sects.map((_, i) => SECTOR_PALETTE[i % SECTOR_PALETTE.length]), borderRadius: 6, borderSkipped: false }] },
+    // Cor de identidade do setor (não alternância por posição): a mesma área
+    // precisa ter a mesma cor em todos os gráficos, senão a cor vira enfeite.
+    data: { labels: sects, datasets: [{ data: pctAbove, backgroundColor: sects.map(s => sectorColor(s)), borderRadius: 6, borderSkipped: false }] },
     options: {
       responsive: true, aspectRatio: 1.8, layout: { padding: { top: 20 } },
       plugins: { legend: { display: false }, datalabels: DL_BAR_V, tooltip: { callbacks: { label: ctx => ' ' + ctx.parsed.y.toFixed(1) + '% acima da meta' } } },
@@ -2132,7 +2275,7 @@ function buildSetoresSection(data) {
   if (chartSectorHead) chartSectorHead.destroy();
   chartSectorHead = new Chart(document.getElementById('chartSectorHead'), {
     type: 'bar',
-    data: { labels: sects, datasets: [{ data: headcount, backgroundColor: '#6212B3', borderRadius: 6, borderSkipped: false }] },
+    data: { labels: sects, datasets: [{ data: headcount, backgroundColor: sects.map(s => sectorColor(s)), borderRadius: 6, borderSkipped: false }] },
     options: {
       responsive: true, aspectRatio: 1.8, layout: { padding: { top: 20 } },
       plugins: {
