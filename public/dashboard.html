@@ -190,6 +190,16 @@
   .modal-item-name { color: #e2e8f0; font-weight: 500; flex: 1; }
   .modal-item-sector { color: #9a9a9a; font-size: 0.75rem; margin: 0 12px; }
   .modal-item-months { display: flex; gap: 6px; }
+
+  /* ─── Boas-vindas ─── */
+  .bv-bloco { border: 1px solid #2e2e2e; border-radius: 10px; padding: 14px 16px; margin-bottom: 10px; background: #1a1a1a; }
+  .bv-bloco-topo { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+  .bv-bloco-titulo { font-size: 0.7rem; color: #9a9a9a; text-transform: uppercase; letter-spacing: 0.06em; }
+  .bv-bloco-valor { font-size: 1.3rem; font-weight: 700; }
+  .bv-bloco-nota { font-size: 0.75rem; color: #9a9a9a; margin-top: 6px; line-height: 1.5; }
+  .bv-linha { display: flex; align-items: center; gap: 8px; font-size: 0.8rem; color: #e2e8f0; margin-top: 7px; }
+  .bv-linha small { color: #9a9a9a; font-size: 0.72rem; }
+  .bv-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
   .modal-chip {
     font-size: 0.7rem; font-weight: 600; padding: 2px 7px; border-radius: 4px;
   }
@@ -353,7 +363,7 @@
   <div class="sidebar-footer">
     <span id="sidebar-period">Dados: Jan – Jun 2026</span><br>
     <span id="sidebar-update">Última atualiz.: Jul 2026</span><br>
-    <span style="color:#3a3a3a;font-size:10px;letter-spacing:.5px">v1.9.6</span>
+    <span style="color:#3a3a3a;font-size:10px;letter-spacing:.5px">v1.10.0</span>
   </div>
 </aside>
 <div class="main-wrap">
@@ -2080,6 +2090,162 @@ function closeModal() {
   document.getElementById('kpiModal').classList.remove('open');
 }
 
+// ─── BOAS-VINDAS ─────────────────────────────────────────────────────────────
+// Resumo do que mudou, mostrado uma vez por dia no primeiro acesso.
+//
+// Segurança: monta tudo a partir de `raw`, que o servidor já recortou conforme o
+// papel (filterByRole). Um gestor só tem as linhas do próprio setor; um líder
+// recebe as outras áreas com nome '__agg__'. Então o popup não consegue vazar
+// nome que a pessoa não poderia ver, mesmo que houvesse erro aqui — a barreira
+// está no servidor, não neste arquivo.
+//
+// Colaborador não recebe o popup: uma devolutiva de performance chegando por
+// software, sem contexto e sem ninguém para conversar, é do tipo que desgasta
+// mais do que ajuda. Esse retorno é do líder, numa conversa.
+function fecharBoasVindas() {
+  document.getElementById('bvModal').classList.remove('open');
+}
+
+function construirBoasVindas() {
+  const u = window.__YOURH_USER__ || {};
+  if (!u.email || u.role === 'colaborador') return;
+  if (!MONTHS.length) return;
+
+  // Uma vez por dia, por pessoa. localStorage pode falhar (aba anônima, bloqueio
+  // de cookies) — nesse caso o popup aparece de novo, que é o erro mais leve.
+  const hoje = new Date();
+  const chave = 'yourh_bv_' + u.email + '_' + hoje.toISOString().slice(0, 10);
+  try { if (localStorage.getItem(chave)) return; } catch (e) {}
+
+  const nomes = d => d.nome !== '__agg__'; // linhas anonimizadas não viram nome
+  const ultimo = MONTHS[MONTHS.length - 1];
+  const penult = MONTHS.length > 1 ? MONTHS[MONTHS.length - 2] : null;
+  const base = raw.filter(d => !excluded.has(d.nome));
+
+  const mediaMes = m => {
+    const v = base.filter(d => d.mes === m).map(d => d.perc);
+    return v.length ? avg(v) : null;
+  };
+  const mUlt = mediaMes(ultimo);
+  const mAnt = penult ? mediaMes(penult) : null;
+  const delta = (mUlt !== null && mAnt !== null) ? mUlt - mAnt : null;
+
+  const blocos = [];
+
+  // 1) Média do último mês e variação
+  if (mUlt !== null) {
+    const cor = mUlt >= 100 ? '#61DD75' : mUlt >= 80 ? '#ecc94b' : '#fc8181';
+    const seta = delta === null ? '' : delta >= 0 ? '↑' : '↓';
+    const corD = delta === null ? '#9a9a9a' : delta >= 0 ? '#61DD75' : '#fc8181';
+    blocos.push(`<div class="bv-bloco">
+      <div class="bv-bloco-topo">
+        <span class="bv-bloco-titulo">Média de ${ultimo}</span>
+        <span class="bv-bloco-valor" style="color:${cor}">${mUlt.toFixed(1)}%</span>
+      </div>
+      ${delta !== null ? `<div class="bv-bloco-nota">
+        <span style="color:${corD};font-weight:600">${seta} ${Math.abs(delta).toFixed(1)} pontos</span> em relação a ${penult}.
+      </div>` : ''}
+    </div>`);
+  }
+
+  // 2) Quem precisa de atenção — abaixo de 80% nos dois últimos meses seguidos
+  if (penult) {
+    const doisUlt = [penult, ultimo];
+    const candidatos = [...new Set(base.filter(nomes).map(d => d.nome))];
+    const atencao = candidatos.map(n => {
+      const e = doisUlt.map(m => base.find(d => d.nome === n && d.mes === m));
+      if (e.some(x => !x) || !e.every(x => x.perc < 80)) return null;
+      return { nome: n, setor: e[1].setor, ultimo: e[1].perc };
+    }).filter(Boolean).sort((a, b) => a.ultimo - b.ultimo);
+
+    if (atencao.length) {
+      blocos.push(`<div class="bv-bloco" style="border-color:#fc818144">
+        <div class="bv-bloco-topo">
+          <span class="bv-bloco-titulo">⚠️ Precisam de atenção</span>
+          <span class="bv-bloco-valor" style="color:#fc8181">${atencao.length}</span>
+        </div>
+        <div class="bv-bloco-nota">Abaixo de 80% em ${penult} e ${ultimo}.</div>
+        ${atencao.slice(0, 5).map(p => `<div class="bv-linha">
+          <span class="bv-dot" style="background:${sectorColor(p.setor)}"></span>
+          ${p.nome} <small>· ${p.setor} · ${p.ultimo.toFixed(0)}%</small>
+        </div>`).join('')}
+        ${atencao.length > 5 ? `<div class="bv-bloco-nota">e mais ${atencao.length - 5}.</div>` : ''}
+      </div>`);
+    }
+  }
+
+  // 3) Destaques — meta batida nos últimos 3 meses e maior evolução do mês
+  const ult3 = MONTHS.slice(-3);
+  if (ult3.length >= 2) {
+    const candidatos = [...new Set(base.filter(nomes).map(d => d.nome))];
+    const consistentes = candidatos.filter(n => {
+      const e = ult3.map(m => base.find(d => d.nome === n && d.mes === m));
+      return e.every(x => x && x.perc >= 100);
+    });
+    let evolucao = null;
+    if (penult) {
+      evolucao = candidatos.map(n => {
+        const a = base.find(d => d.nome === n && d.mes === penult);
+        const b = base.find(d => d.nome === n && d.mes === ultimo);
+        return (a && b) ? { nome: n, setor: b.setor, ganho: b.perc - a.perc } : null;
+      }).filter(x => x && x.ganho > 0).sort((a, b) => b.ganho - a.ganho)[0];
+    }
+    if (consistentes.length || evolucao) {
+      blocos.push(`<div class="bv-bloco" style="border-color:#61DD7544">
+        <div class="bv-bloco-topo">
+          <span class="bv-bloco-titulo">🏆 Destaques</span>
+          ${consistentes.length ? `<span class="bv-bloco-valor" style="color:#61DD75">${consistentes.length}</span>` : ''}
+        </div>
+        ${consistentes.length ? `<div class="bv-bloco-nota">Bateram a meta nos últimos ${ult3.length} meses seguidos.</div>` : ''}
+        ${consistentes.slice(0, 4).map(n => {
+          const s = base.filter(d => d.nome === n).pop().setor;
+          return `<div class="bv-linha"><span class="bv-dot" style="background:${sectorColor(s)}"></span>${n} <small>· ${s}</small></div>`;
+        }).join('')}
+        ${consistentes.length > 4 ? `<div class="bv-bloco-nota">e mais ${consistentes.length - 4}.</div>` : ''}
+        ${evolucao ? `<div class="bv-bloco-nota" style="margin-top:10px">
+          Maior evolução do mês: <strong style="color:#e2e8f0">${evolucao.nome}</strong>, +${evolucao.ganho.toFixed(1)} pontos.
+        </div>` : ''}
+      </div>`);
+    }
+  }
+
+  // 4) Ranking de áreas — só faz sentido havendo mais de um setor no recorte.
+  // Um gestor recebe apenas o próprio setor, então este bloco não aparece pra ele.
+  const setoresUlt = [...new Set(base.filter(d => d.mes === ultimo).map(d => d.setor))].filter(Boolean);
+  if (setoresUlt.length > 1) {
+    const rank = setoresUlt.map(s => ({
+      setor: s,
+      media: avg(base.filter(d => d.mes === ultimo && d.setor === s).map(d => d.perc))
+    })).sort((a, b) => b.media - a.media);
+    const meuSetor = (u.setor || '').split(',')[0].trim();
+    blocos.push(`<div class="bv-bloco">
+      <div class="bv-bloco-topo"><span class="bv-bloco-titulo">Áreas em ${ultimo}</span></div>
+      ${rank.slice(0, 3).map((s, i) => `<div class="bv-linha">
+        <span style="opacity:.6;min-width:16px">${i + 1}º</span>
+        <span class="bv-dot" style="background:${sectorColor(s.setor)}"></span>
+        ${s.setor} <small>· ${s.media.toFixed(1)}%</small>
+      </div>`).join('')}
+      ${meuSetor && rank.findIndex(s => s.setor === meuSetor) > 2
+        ? `<div class="bv-bloco-nota" style="margin-top:10px">Sua área, ${meuSetor}, está em ${rank.findIndex(s => s.setor === meuSetor) + 1}º de ${rank.length}.</div>`
+        : ''}
+    </div>`);
+  }
+
+  if (!blocos.length) return; // sem nada a dizer, não interrompe a pessoa
+
+  const h = hoje.getHours();
+  const saudacao = h < 12 ? 'Bom dia' : h < 18 ? 'Boa tarde' : 'Boa noite';
+  const primeiro = (u.nome || '').trim().split(/\s+/)[0] || '';
+  const diaSemana = hoje.toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' });
+
+  document.getElementById('bvSaudacao').textContent = `${saudacao}, ${primeiro}`;
+  document.getElementById('bvSub').textContent = `${diaSemana} · dados mais recentes: ${ultimo}`;
+  document.getElementById('bvConteudo').innerHTML = blocos.join('');
+  document.getElementById('bvModal').classList.add('open');
+
+  try { localStorage.setItem(chave, '1'); } catch (e) {}
+}
+
 // ─── ATUALIZAR DADOS DA PLANILHA ─────────────────────────────────────────────
 // O servidor guarda os dados da planilha por 5 minutos (CACHE_TTL_MS) para não
 // bater na API do Google a cada carregamento. Isso significa que uma correção
@@ -2926,10 +3092,16 @@ function buildHeatmapSetor(activeRaw) {
   document.getElementById('heatmap-wrap').innerHTML = html;
 }
 
-document.addEventListener('keydown', e => { if(e.key==='Escape') closeModal(); });
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') { closeModal(); fecharBoasVindas(); }
+});
 
 // ─── INIT ─────────────────────────────────────────────────────────────────────
 render();
+
+// O HTML dos modais fica DEPOIS deste bloco de script, então os elementos ainda
+// não existem neste ponto. Chamar direto aqui daria null em getElementById.
+document.addEventListener('DOMContentLoaded', construirBoasVindas);
 
 </script>
 </div><!--main-scroll-->
@@ -2937,6 +3109,19 @@ render();
 </div><!--app-->
 
 <!-- ─── MODAL POPUP ─────────────────────────────────────────────────────────── -->
+<!-- ─── BOAS-VINDAS ───────────────────────────────────────────────────────── -->
+<div class="modal-overlay" id="bvModal" onclick="if(event.target===this)fecharBoasVindas()">
+  <div class="modal-box" id="bvBox" style="max-width:600px">
+    <div class="modal-header">
+      <span class="modal-title" id="bvSaudacao"></span>
+      <button class="modal-close" onclick="fecharBoasVindas()">✕</button>
+    </div>
+    <div class="modal-count" id="bvSub"></div>
+    <div class="modal-list" id="bvConteudo"></div>
+    <button onclick="fecharBoasVindas()" style="margin-top:18px;background:#61DD7522;border:1.5px solid #61DD75;color:#61DD75;border-radius:8px;padding:10px;font-size:0.85rem;cursor:pointer;font-family:inherit;width:100%">Ver o painel</button>
+  </div>
+</div>
+
 <div class="modal-overlay" id="kpiModal" onclick="if(event.target===this)closeModal()">
   <div class="modal-box" id="modalBox">
     <div class="modal-header">
