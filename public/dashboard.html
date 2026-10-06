@@ -363,7 +363,7 @@
   <div class="sidebar-footer">
     <span id="sidebar-period">Dados: Jan – Jun 2026</span><br>
     <span id="sidebar-update">Última atualiz.: Jul 2026</span><br>
-    <span style="color:#3a3a3a;font-size:10px;letter-spacing:.5px">v1.11.0</span>
+    <span style="color:#3a3a3a;font-size:10px;letter-spacing:.5px">v1.12.0</span>
   </div>
 </aside>
 <div class="main-wrap">
@@ -766,23 +766,73 @@ raw.forEach(d => {
 // ─── NORMALIZAÇÃO DE NOMES ────────────────────────────────────────────────────
 // Se "João" e "João Silva" coexistem, substitui "João" por "João Silva" em todo raw
 (function normalizeNames() {
-  const firstToFull = {};
+  // Compara sem acento e sem caixa. ERA O BUG: a chave usava apenas
+  // toLowerCase(), então "Marcia" virava 'marcia' e "Márcia Dos Santos
+  // Maroniene" virava 'márcia' — nunca se encontravam, e a mesma pessoa
+  // ficava com dois históricos pela metade. "Marceli" funcionava só porque
+  // não tem acento.
+  const semAcento = t => (t || '').toLowerCase().trim().normalize('NFD')
+    .split('').filter(c => { const n = c.charCodeAt(0); return n < 0x0300 || n > 0x036F; })
+    .join('').replace(/\s+/g, ' ');
+
+  // ── Caso 1: só o primeiro nome em alguns meses, nome completo em outros ──
+  const primeiroParaCompleto = {};
   raw.forEach(d => {
-    const parts = (d.nome || '').trim().split(/\s+/);
-    if (parts.length > 1) {
-      const key = parts[0].toLowerCase();
-      // Prefere o nome completo mais longo se houver conflito
-      if (!firstToFull[key] || d.nome.length > firstToFull[key].length) {
-        firstToFull[key] = d.nome;
+    const partes = (d.nome || '').trim().split(/\s+/);
+    if (partes.length > 1) {
+      const chave = semAcento(partes[0]);
+      if (!primeiroParaCompleto[chave] || d.nome.length > primeiroParaCompleto[chave].length) {
+        primeiroParaCompleto[chave] = d.nome;
       }
     }
   });
   raw.forEach(d => {
-    const parts = (d.nome || '').trim().split(/\s+/);
-    if (parts.length === 1) {
-      const full = firstToFull[d.nome.toLowerCase()];
-      if (full) d.nome = full;
+    const partes = (d.nome || '').trim().split(/\s+/);
+    if (partes.length === 1) {
+      const completo = primeiroParaCompleto[semAcento(d.nome)];
+      if (completo) d.nome = completo;
     }
+  });
+
+  // ── Caso 2: duas grafias com sobrenome, uma sendo início da outra
+  // ("Jeferson Chaves" e "Jeferson Chaves Ferreira"). A regra acima não alcança
+  // porque ambas têm mais de um token.
+  // Guarda contra falso positivo: se as duas grafias aparecem no MESMO mês, são
+  // pessoas diferentes — ninguém é lançado duas vezes no mesmo mês — e a fusão
+  // não acontece. Sem essa trava, um "João Silva" e um "João Silva Santos"
+  // distintos seriam colapsados em um só.
+  const mesesDoNome = {};
+  raw.forEach(d => { (mesesDoNome[d.nome] = mesesDoNome[d.nome] || new Set()).add(d.mes); });
+  const distintos = Object.keys(mesesDoNome).sort((a, b) => b.length - a.length);
+  const fundirEm = {};
+  distintos.forEach(longo => {
+    distintos.forEach(curto => {
+      if (curto === longo || fundirEm[curto]) return;
+      if (!semAcento(longo).startsWith(semAcento(curto) + ' ')) return;
+      const colidem = [...mesesDoNome[curto]].some(m => mesesDoNome[longo].has(m));
+      if (!colidem) fundirEm[curto] = longo;
+    });
+  });
+  raw.forEach(d => { if (fundirEm[d.nome]) d.nome = fundirEm[d.nome]; });
+
+  // ── Setor retroativo ──
+  // Quando alguém muda de área, o histórico acompanha: a área ATUAL da pessoa
+  // passa a valer para todos os meses dela. Assim a trajetória de um time é a do
+  // time como ele é hoje — se o Iandell hoje é CS, a curva de CS inclui o que
+  // ele entregou antes, e a de Tecnologia não o carrega mais.
+  // O custo consciente dessa escolha: a média de um setor em um mês passado
+  // deixa de ser exatamente o que aquele setor entregou naquele mês. Foi uma
+  // decisão de produto, para dar sustentação à leitura do time atual.
+  const registrosPorPessoa = {};
+  raw.forEach(d => { (registrosPorPessoa[d.nome] = registrosPorPessoa[d.nome] || []).push(d); });
+  const ordemMes = ["Janeiro","Fevereiro","Março","Abril","Maio","Junho",
+                    "Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
+  Object.values(registrosPorPessoa).forEach(regs => {
+    let maisRecente = regs[0];
+    regs.forEach(r => {
+      if (ordemMes.indexOf(r.mes) >= ordemMes.indexOf(maisRecente.mes)) maisRecente = r;
+    });
+    if (maisRecente.setor) regs.forEach(r => { r.setor = maisRecente.setor; });
   });
 })();
 
@@ -897,14 +947,32 @@ function onActiveToggle() {
   const badge = document.getElementById('active-badge');
   lbl.classList.toggle('on', on);
   if (on) {
-    const count = getActiveNames().size;
-    lbl.textContent = 'Apenas Ativos · ' + count;
-    badge.classList.remove('visible');
+    const ativos = getActiveNames().size;
+    const total = pessoasDaBase().length;
+    // Mostra "54 de 55" em vez de só "54": a diferença entre os dois números era
+    // invisível, e descobrir QUEM ficou de fora exigia conferir na mão.
+    lbl.textContent = 'Apenas Ativos · ' + ativos + ' de ' + total;
+    const fora = total - ativos;
+    if (fora > 0) {
+      badge.textContent = fora + ' fora';
+      badge.style.cursor = 'pointer';
+      badge.title = 'Ver quem está fora do filtro';
+      badge.onclick = () => openKpiModal('inativos');
+      badge.classList.add('visible');
+    } else {
+      badge.classList.remove('visible');
+    }
   } else {
     lbl.textContent = 'Colaborador Ativo';
     badge.classList.remove('visible');
   }
   render();
+}
+
+// Todas as pessoas reais da base, independente de filtro de mês ou setor —
+// é o denominador de "X de Y ativos".
+function pessoasDaBase() {
+  return [...new Set(raw.filter(d => d.nome !== '__agg__' && !excluded.has(d.nome)).map(d => d.nome))];
 }
 
 function getFiltered() {
@@ -1922,6 +1990,44 @@ function openKpiModal(type) {
     document.getElementById('modalCount').textContent = contagem;
     document.getElementById('modalList').innerHTML = listHtml;
     document.getElementById('kpiModal').classList.add('open');
+  }
+
+  // ── Inativos: quem existe na base mas não aparece no mês mais recente ───────
+  // Responde "quem falta?" sem ninguém precisar conferir linha a linha. A causa
+  // quase sempre é uma destas: a pessoa saiu da empresa, estava de férias ou
+  // licença no mês, ou o lançamento dela ficou faltando na planilha.
+  if (type === 'inativos') {
+    const ultimoMes = MONTHS[MONTHS.length - 1];
+    const ativos = getActiveNames();
+    const base = raw.filter(d => d.nome !== '__agg__' && !excluded.has(d.nome));
+    const porNome = {};
+    base.forEach(d => { (porNome[d.nome] = porNome[d.nome] || []).push(d); });
+
+    const fora = Object.keys(porNome).filter(n => !ativos.has(n)).map(n => {
+      const regs = porNome[n];
+      let ult = regs[0];
+      regs.forEach(r => { if (MONTHS.indexOf(r.mes) >= MONTHS.indexOf(ult.mes)) ult = r; });
+      return { nome: n, setor: ult.setor, ultimoMes: ult.mes,
+               desde: MONTHS.length - 1 - MONTHS.indexOf(ult.mes), meses: regs.length };
+    }).sort((a, b) => MONTHS.indexOf(b.ultimoMes) - MONTHS.indexOf(a.ultimoMes));
+
+    const listHtml = fora.length
+      ? fora.map(p => `<div class="modal-item">
+          <span class="modal-item-name">
+            <span class="bv-dot" style="display:inline-block;background:${sectorColor(p.setor)};margin-right:8px"></span>${p.nome}
+          </span>
+          <span class="modal-item-sector">${p.setor}</span>
+          <span class="modal-item-months">
+            <span class="modal-chip" style="opacity:.8">último: ${p.ultimoMes}</span>
+            <span class="modal-chip ${p.desde >= 3 ? 'red' : 'yellow'}">${p.desde} ${p.desde !== 1 ? 'meses' : 'mês'} sem lançamento</span>
+          </span>
+        </div>`).join('')
+      : '<p style="color:#61DD75;padding:16px">✓ Todo mundo da base tem lançamento no mês mais recente.</p>';
+
+    abrirModal('#ecc94b', '👤 Fora do filtro de ativos',
+      `${fora.length} de ${Object.keys(porNome).length} · sem lançamento em ${ultimoMes}`,
+      listHtml);
+    return;
   }
 
   // ── Top Performer: ranking dos elegíveis com o histórico mês a mês ──────────
