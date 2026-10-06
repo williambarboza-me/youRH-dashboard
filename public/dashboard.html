@@ -363,7 +363,7 @@
   <div class="sidebar-footer">
     <span id="sidebar-period">Dados: Jan – Jun 2026</span><br>
     <span id="sidebar-update">Última atualiz.: Jul 2026</span><br>
-    <span style="color:#3a3a3a;font-size:10px;letter-spacing:.5px">v1.12.0</span>
+    <span style="color:#3a3a3a;font-size:10px;letter-spacing:.5px">v1.12.1</span>
   </div>
 </aside>
 <div class="main-wrap">
@@ -947,21 +947,14 @@ function onActiveToggle() {
   const badge = document.getElementById('active-badge');
   lbl.classList.toggle('on', on);
   if (on) {
+    // Mostra apenas a contagem de ativos. Já tentamos exibir "54 de 70" com um
+    // selo "16 fora", mas o 70 soma todo mundo que já passou pela empresa desde
+    // janeiro — gente desligada há meses entrava na conta e o número levantava
+    // dúvida em vez de responder. Quem quiser a lista de quem não tem lançamento
+    // no mês continua tendo o popup, acessível pelo próprio rótulo.
     const ativos = getActiveNames().size;
-    const total = pessoasDaBase().length;
-    // Mostra "54 de 55" em vez de só "54": a diferença entre os dois números era
-    // invisível, e descobrir QUEM ficou de fora exigia conferir na mão.
-    lbl.textContent = 'Apenas Ativos · ' + ativos + ' de ' + total;
-    const fora = total - ativos;
-    if (fora > 0) {
-      badge.textContent = fora + ' fora';
-      badge.style.cursor = 'pointer';
-      badge.title = 'Ver quem está fora do filtro';
-      badge.onclick = () => openKpiModal('inativos');
-      badge.classList.add('visible');
-    } else {
-      badge.classList.remove('visible');
-    }
+    lbl.textContent = 'Apenas Ativos · ' + ativos;
+    badge.classList.remove('visible');
   } else {
     lbl.textContent = 'Colaborador Ativo';
     badge.classList.remove('visible');
@@ -969,11 +962,6 @@ function onActiveToggle() {
   render();
 }
 
-// Todas as pessoas reais da base, independente de filtro de mês ou setor —
-// é o denominador de "X de Y ativos".
-function pessoasDaBase() {
-  return [...new Set(raw.filter(d => d.nome !== '__agg__' && !excluded.has(d.nome)).map(d => d.nome))];
-}
 
 function getFiltered() {
   const m = document.getElementById('filter-month').value;
@@ -1990,44 +1978,6 @@ function openKpiModal(type) {
     document.getElementById('modalCount').textContent = contagem;
     document.getElementById('modalList').innerHTML = listHtml;
     document.getElementById('kpiModal').classList.add('open');
-  }
-
-  // ── Inativos: quem existe na base mas não aparece no mês mais recente ───────
-  // Responde "quem falta?" sem ninguém precisar conferir linha a linha. A causa
-  // quase sempre é uma destas: a pessoa saiu da empresa, estava de férias ou
-  // licença no mês, ou o lançamento dela ficou faltando na planilha.
-  if (type === 'inativos') {
-    const ultimoMes = MONTHS[MONTHS.length - 1];
-    const ativos = getActiveNames();
-    const base = raw.filter(d => d.nome !== '__agg__' && !excluded.has(d.nome));
-    const porNome = {};
-    base.forEach(d => { (porNome[d.nome] = porNome[d.nome] || []).push(d); });
-
-    const fora = Object.keys(porNome).filter(n => !ativos.has(n)).map(n => {
-      const regs = porNome[n];
-      let ult = regs[0];
-      regs.forEach(r => { if (MONTHS.indexOf(r.mes) >= MONTHS.indexOf(ult.mes)) ult = r; });
-      return { nome: n, setor: ult.setor, ultimoMes: ult.mes,
-               desde: MONTHS.length - 1 - MONTHS.indexOf(ult.mes), meses: regs.length };
-    }).sort((a, b) => MONTHS.indexOf(b.ultimoMes) - MONTHS.indexOf(a.ultimoMes));
-
-    const listHtml = fora.length
-      ? fora.map(p => `<div class="modal-item">
-          <span class="modal-item-name">
-            <span class="bv-dot" style="display:inline-block;background:${sectorColor(p.setor)};margin-right:8px"></span>${p.nome}
-          </span>
-          <span class="modal-item-sector">${p.setor}</span>
-          <span class="modal-item-months">
-            <span class="modal-chip" style="opacity:.8">último: ${p.ultimoMes}</span>
-            <span class="modal-chip ${p.desde >= 3 ? 'red' : 'yellow'}">${p.desde} ${p.desde !== 1 ? 'meses' : 'mês'} sem lançamento</span>
-          </span>
-        </div>`).join('')
-      : '<p style="color:#61DD75;padding:16px">✓ Todo mundo da base tem lançamento no mês mais recente.</p>';
-
-    abrirModal('#ecc94b', '👤 Fora do filtro de ativos',
-      `${fora.length} de ${Object.keys(porNome).length} · sem lançamento em ${ultimoMes}`,
-      listHtml);
-    return;
   }
 
   // ── Top Performer: ranking dos elegíveis com o histórico mês a mês ──────────
