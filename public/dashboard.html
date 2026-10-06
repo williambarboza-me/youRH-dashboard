@@ -363,7 +363,7 @@
   <div class="sidebar-footer">
     <span id="sidebar-period">Dados: Jan – Jun 2026</span><br>
     <span id="sidebar-update">Última atualiz.: Jul 2026</span><br>
-    <span style="color:#3a3a3a;font-size:10px;letter-spacing:.5px">v1.10.0</span>
+    <span style="color:#3a3a3a;font-size:10px;letter-spacing:.5px">v1.11.0</span>
   </div>
 </aside>
 <div class="main-wrap">
@@ -389,8 +389,7 @@
       <option value="all">Todos os meses</option>
       <optgroup label="── Períodos">
         <option value="L3M">Últimos 3 meses</option>
-        <option value="Q1">Q1 — Jan · Fev · Mar</option>
-        <option value="Q2">Q2 — Abr · Mai · Jun</option>
+        <!-- trimestres inseridos pelo JS, só os que têm dado -->
       </optgroup>
       <optgroup label="── Meses"><!-- preenchido dinamicamente pelo JS --></optgroup>
     </select>
@@ -843,10 +842,42 @@ function matchRange(perc, range) {
   return true;
 }
 
-const Q1_MONTHS = ['Janeiro','Fevereiro','Março'];
-const Q2_MONTHS = ['Abril','Maio','Junho'];
+// Trimestres declarados por extenso, mas só entram no painel os que de fato têm
+// dado na base. Assim Setembro fechando o Q3 — ou Dezembro fechando o Q4 — passa
+// a aparecer sozinho, sem ninguém precisar lembrar de mexer no código. Antes Q1 e
+// Q2 eram fixos e os meses de Julho em diante ficavam invisíveis na seção Empresa.
+const QUARTERS = [
+  { id:'Q1', meses:['Janeiro','Fevereiro','Março'],      cor:'#6212B3' },
+  { id:'Q2', meses:['Abril','Maio','Junho'],             cor:'#61DD75' },
+  { id:'Q3', meses:['Julho','Agosto','Setembro'],        cor:'#38BDF8' },
+  { id:'Q4', meses:['Outubro','Novembro','Dezembro'],    cor:'#FB923C' },
+];
+const QUARTERS_ATIVOS = QUARTERS
+  .map(q => ({ ...q, presentes: q.meses.filter(m => MONTHS.includes(m)) }))
+  .filter(q => q.presentes.length > 0);
+
+const Q1_MONTHS = QUARTERS[0].meses;
+const Q2_MONTHS = QUARTERS[1].meses;
 // Últimos 3 meses — dinâmico, baseado nos meses disponíveis no raw
 const L3M_MONTHS = MONTHS.slice(-3);
+
+// Insere no filtro só os trimestres que têm dado. Fica aqui, e não junto da
+// população dos meses, porque aquele bloco roda antes de QUARTERS ser declarado.
+(function() {
+  const grp = document.querySelector('#filter-month optgroup[label="── Períodos"]');
+  if (!grp) return;
+  const abrev = { 'Janeiro':'Jan','Fevereiro':'Fev','Março':'Mar','Abril':'Abr','Maio':'Mai',
+                  'Junho':'Jun','Julho':'Jul','Agosto':'Ago','Setembro':'Set',
+                  'Outubro':'Out','Novembro':'Nov','Dezembro':'Dez' };
+  QUARTERS_ATIVOS.forEach(q => {
+    const o = document.createElement('option');
+    o.value = q.id;
+    // Mostra só os meses já presentes: um trimestre em andamento não deve
+    // prometer meses que ainda não existem na base.
+    o.textContent = q.id + ' — ' + q.presentes.map(m => abrev[m]).join(' · ');
+    grp.appendChild(o);
+  });
+})();
 const excluded = new Set();
 
 // Collaborator is "active" if they have a record in the last available month
@@ -881,7 +912,8 @@ function getFiltered() {
   const s = document.getElementById('filter-sector').value;
   const r = document.getElementById('filter-range').value;
   const q = document.getElementById('search').value.toLowerCase();
-  const qMonths = m === 'Q1' ? Q1_MONTHS : m === 'Q2' ? Q2_MONTHS : m === 'L3M' ? L3M_MONTHS : null;
+  const quarter = QUARTERS.find(q => q.id === m);
+  const qMonths = quarter ? quarter.meses : (m === 'L3M' ? L3M_MONTHS : null);
   const activeNames = isActiveFilterOn() ? getActiveNames() : null;
   return raw.filter(d =>
     d.nome !== '__agg__' &&
@@ -918,6 +950,20 @@ Chart.register(ChartDataLabels);
 // entre si. Contar registros (pessoa × mês) fazia a mesma pessoa aparecer em
 // várias faixas ao mesmo tempo, e a régua "ao menos um mês acima" era fraca
 // demais — em 8 meses quase todo mundo tem um mês bom, o que inflava o KPI.
+// Uma pessoa pode mudar de área no meio do ano. Para qualquer leitura de "quem
+// está nesta área", vale a área MAIS RECENTE dela — contar pela área de cada
+// registro faria quem mudou aparecer nos dois times ao mesmo tempo, inflando o
+// headcount e fazendo duas colunas da mesma tabela discordarem. Séries temporais
+// (evolução mês a mês) continuam usando a área de cada mês, onde o histórico é
+// justamente o ponto. Ordena pelo calendário em vez de confiar na ordem das
+// linhas da planilha, que ninguém garante.
+function setorAtualDe(entries) {
+  if (!entries || !entries.length) return '';
+  let ult = entries[0];
+  entries.forEach(e => { if (MONTHS.indexOf(e.mes) >= MONTHS.indexOf(ult.mes)) ult = e; });
+  return ult.setor;
+}
+
 function mediaPorPessoa(data) {
   const mapa = {};
   data.forEach(d => { (mapa[d.nome] = mapa[d.nome] || []).push(d); });
@@ -925,7 +971,7 @@ function mediaPorPessoa(data) {
     const entries = mapa[nome];
     return {
       nome,
-      setor: entries[entries.length - 1].setor,
+      setor: setorAtualDe(entries),
       entries,
       media: avg(entries.map(d => d.perc)),
       meses: entries.length
@@ -1517,20 +1563,24 @@ function buildMatrizSetores(data) {
   const activeNames = isActiveFilterOn() ? getActiveNames() : null;
   const filtered = raw.filter(d => !excluded.has(d.nome) && (!activeNames || activeNames.has(d.nome)));
 
-  // Per sector: monthly avgs → consistency (100−stdev), avg performance, headcount
+  // Por setor: médias mensais → consistência (100−stdev), performance e headcount.
+  // As médias mensais usam a área de CADA mês (histórico fiel), mas o headcount
+  // — tamanho da bolha — usa a área atual da pessoa: quem mudou de time no meio
+  // do ano inflaria as duas bolhas se fosse contado por registro.
   const secMap = {};
   filtered.forEach(d => {
-    if (!secMap[d.setor]) secMap[d.setor] = { monthBuckets: {}, names: new Set() };
+    if (!secMap[d.setor]) secMap[d.setor] = { monthBuckets: {} };
     if (!secMap[d.setor].monthBuckets[d.mes]) secMap[d.setor].monthBuckets[d.mes] = [];
     secMap[d.setor].monthBuckets[d.mes].push(d.perc);
-    secMap[d.setor].names.add(d.nome);
   });
+  const headPorSetor = {};
+  mediaPorPessoa(filtered).forEach(p => { headPorSetor[p.setor] = (headPorSetor[p.setor] || 0) + 1; });
 
   const datasets = Object.entries(secMap).map(([setor, info]) => {
     const mAvgs = Object.values(info.monthBuckets).map(arr => avg(arr));
     const avgPerf = avg(mAvgs);
     const consistency = 100 - stdev(mAvgs);
-    const hc = info.names.size;
+    const hc = headPorSetor[setor] || 0;
     const color = sectorColor(setor);
     return {
       label: setor,
@@ -2040,7 +2090,7 @@ function openKpiModal(type) {
   const allPeople = names
     .map(nome => {
       const entries = last3Data.filter(d => d.nome === nome);
-      return { nome, setor: entries[0].setor, entries };
+      return { nome, setor: setorAtualDe(entries), entries };
     })
     .filter(p => p.entries.find(d => d.mes === lastMonth) && p.entries.length >= 2);
 
@@ -2710,16 +2760,20 @@ function renderSetorEvolLegend(sectorList) {
 
 function buildSetoresSection(data) {
   buildSetorEvol();
+  // vals guarda TODOS os registros do setor no periodo, inclusive os meses em
+  // que alguem que ja mudou de area ainda pertencia a ela: a media do setor
+  // precisa refletir o que o setor de fato entregou naquele periodo.
   const sectorMap = {};
   data.forEach(d => {
-    if (!sectorMap[d.setor]) sectorMap[d.setor] = { vals: [], names: new Set() };
+    if (!sectorMap[d.setor]) sectorMap[d.setor] = { vals: [] };
     sectorMap[d.setor].vals.push(d.perc);
-    sectorMap[d.setor].names.add(d.nome);
   });
   const sects = Object.keys(sectorMap).sort((a, b) => avg(sectorMap[b].vals) - avg(sectorMap[a].vals));
 
-  // Percentual de PESSOAS do setor cuja média no período bate a meta — o
-  // rótulo diz "Equipe", então a conta precisa ser sobre gente, não registros.
+  // Ja o HEADCOUNT e os percentuais falam de gente, e precisam sair da MESMA
+  // lista — pela area atual de cada pessoa. Antes o headcount vinha dos
+  // registros (quem mudou de area contava nos dois times) enquanto os
+  // percentuais vinham daqui, e as duas colunas da mesma tabela discordavam.
   const pessoasPorSetor = {};
   mediaPorPessoa(data).forEach(p => { (pessoasPorSetor[p.setor] = pessoasPorSetor[p.setor] || []).push(p); });
   const pctAbove = sects.map(s => {
@@ -2743,7 +2797,7 @@ function buildSetoresSection(data) {
     }
   });
 
-  const headcount = sects.map(s => sectorMap[s].names.size);
+  const headcount = sects.map(s => (pessoasPorSetor[s] || []).length);
   if (chartSectorHead) chartSectorHead.destroy();
   chartSectorHead = new Chart(document.getElementById('chartSectorHead'), {
     type: 'bar',
@@ -2778,7 +2832,7 @@ function buildSetoresSection(data) {
       const c = percColor(avgV);
       return '<tr>' +
         '<td><span class="badge ' + sectorBadge(s) + '">' + s + '</span></td>' +
-        '<td style="color:#9a9a9a">' + sectorMap[s].names.size + '</td>' +
+        '<td style="color:#9a9a9a">' + (pessoasPorSetor[s] || []).length + '</td>' +
         '<td style="color:' + c + ';font-weight:600">' + avgV.toFixed(1) + '%</td>' +
         '<td style="color:#61DD75">' + abv + '%</td>' +
         '<td style="color:' + (Number(blw) > 0 ? '#fc8181' : '#9a9a9a') + '">' + blw + '%</td>' +
@@ -2791,13 +2845,16 @@ function buildSetoresSection(data) {
 let chartQ1Q2, chartQ1Q2Setor;
 function buildEmpresaSection() {
   const ar = raw.filter(d => !excluded.has(d.nome));
-  const q1d = ar.filter(d => Q1_MONTHS.includes(d.mes));
-  const q2d = ar.filter(d => Q2_MONTHS.includes(d.mes));
-  const q1a = avg(q1d.map(d => d.perc));
-  const q2a = avg(q2d.map(d => d.perc));
-  const diff = q2a - q1a;
+
+  // Um bloco por trimestre COM DADO. Antes Q1 e Q2 eram fixos no código, então
+  // Julho em diante não aparecia em lugar nenhum desta seção.
+  const tris = QUARTERS_ATIVOS.map(q => {
+    const linhas = ar.filter(d => q.meses.includes(d.mes));
+    return { ...q, linhas, media: linhas.length ? avg(linhas.map(d => d.perc)) : null };
+  }).filter(q => q.media !== null);
+
   const totalHead = [...new Set(ar.map(d => d.nome))].length;
-  const overallAvg = avg(ar.map(d => d.perc));
+  const overallAvg = ar.length ? avg(ar.map(d => d.perc)) : 0;
   // Percentual de PESSOAS que batem a meta pela média do período — mesma régua
   // usada na Visão Geral e na seção Setores, para que os números concordem.
   const pessoasEmp = mediaPorPessoa(ar);
@@ -2806,7 +2863,16 @@ function buildEmpresaSection() {
     : '0';
   const periodoLabel = MONTHS.length ? MONTHS[0] + ' – ' + MONTHS[MONTHS.length-1] + ' 2026' : '—';
 
+  // Comparação entre os DOIS ÚLTIMOS trimestres com dado, seja qual for o par.
+  const penult = tris.length >= 2 ? tris[tris.length - 2] : null;
+  const ultimo = tris.length ? tris[tris.length - 1] : null;
+  const diff = (penult && ultimo) ? ultimo.media - penult.media : null;
+
   const cls = v => v >= 100 ? 'green' : v >= 80 ? 'yellow' : 'red';
+  const abrev = { 'Janeiro':'Jan','Fevereiro':'Fev','Março':'Mar','Abril':'Abr','Maio':'Mai',
+                  'Junho':'Jun','Julho':'Jul','Agosto':'Ago','Setembro':'Set',
+                  'Outubro':'Out','Novembro':'Nov','Dezembro':'Dez' };
+
   document.getElementById('empresa-kpis').innerHTML =
     '<div class="kpi"><div class="kpi-label">Total de Colaboradores</div>' +
       '<div class="kpi-value blue">' + totalHead + '</div>' +
@@ -2814,25 +2880,27 @@ function buildEmpresaSection() {
     '<div class="kpi"><div class="kpi-label">Média do Período</div>' +
       '<div class="kpi-value ' + cls(overallAvg) + '">' + overallAvg.toFixed(1) + '%</div>' +
       '<div class="kpi-sub">' + periodoLabel + '</div></div>' +
-    '<div class="kpi"><div class="kpi-label">Média Q1</div>' +
-      '<div class="kpi-value ' + cls(q1a) + '">' + q1a.toFixed(1) + '%</div>' +
-      '<div class="kpi-sub">Jan · Fev · Mar</div></div>' +
-    '<div class="kpi"><div class="kpi-label">Média Q2</div>' +
-      '<div class="kpi-value ' + cls(q2a) + '">' + q2a.toFixed(1) + '%</div>' +
-      '<div class="kpi-sub">Abr · Mai · Jun</div></div>' +
+    tris.map(q =>
+      '<div class="kpi"><div class="kpi-label">Média ' + q.id + '</div>' +
+        '<div class="kpi-value ' + cls(q.media) + '">' + q.media.toFixed(1) + '%</div>' +
+        '<div class="kpi-sub">' + q.presentes.map(m => abrev[m]).join(' · ') +
+        (q.presentes.length < q.meses.length ? ' · em andamento' : '') + '</div></div>'
+    ).join('') +
     '<div class="kpi"><div class="kpi-label">Acima da Meta (Período)</div>' +
       '<div class="kpi-value ' + (Number(pctA) >= 60 ? 'green' : 'yellow') + '">' + pctA + '%</div>' +
       '<div class="kpi-sub">da equipe, pela média</div></div>' +
-    '<div class="kpi"><div class="kpi-label">Variação Q1→Q2</div>' +
-      '<div class="kpi-value ' + (diff >= 0 ? 'green' : 'red') + '">' + (diff >= 0 ? '+' : '') + diff.toFixed(1) + 'pp</div>' +
-      '<div class="kpi-sub">evolução entre trimestres</div></div>';
+    (diff !== null
+      ? '<div class="kpi"><div class="kpi-label">Variação ' + penult.id + '→' + ultimo.id + '</div>' +
+          '<div class="kpi-value ' + (diff >= 0 ? 'green' : 'red') + '">' + (diff >= 0 ? '+' : '') + diff.toFixed(1) + 'pp</div>' +
+          '<div class="kpi-sub">evolução entre trimestres</div></div>'
+      : '');
 
   if (chartQ1Q2) chartQ1Q2.destroy();
   chartQ1Q2 = new Chart(document.getElementById('chartQ1Q2'), {
     type: 'bar',
     data: {
-      labels: ['Q1 (Jan–Mar)', 'Q2 (Abr–Jun)'],
-      datasets: [{ data: [+q1a.toFixed(2), +q2a.toFixed(2)], backgroundColor: ['#6212B3', '#61DD75'], borderRadius: 8, borderSkipped: false }]
+      labels: tris.map(q => q.id + ' (' + abrev[q.presentes[0]] + '–' + abrev[q.presentes[q.presentes.length-1]] + ')'),
+      datasets: [{ data: tris.map(q => +q.media.toFixed(2)), backgroundColor: tris.map(q => q.cor), borderRadius: 8, borderSkipped: false }]
     },
     options: {
       responsive: true, aspectRatio: 2, layout: { padding: { top: 24 } },
@@ -2845,18 +2913,21 @@ function buildEmpresaSection() {
   });
 
   const allSects = [...new Set(ar.map(d => d.setor))].sort();
-  const q1bs = allSects.map(s => { const v = q1d.filter(d => d.setor === s).map(d => d.perc); return v.length ? +avg(v).toFixed(2) : null; });
-  const q2bs = allSects.map(s => { const v = q2d.filter(d => d.setor === s).map(d => d.perc); return v.length ? +avg(v).toFixed(2) : null; });
-
   if (chartQ1Q2Setor) chartQ1Q2Setor.destroy();
   chartQ1Q2Setor = new Chart(document.getElementById('chartQ1Q2Setor'), {
     type: 'bar',
     data: {
       labels: allSects,
-      datasets: [
-        { label: 'Q1', data: q1bs, backgroundColor: '#6212B3', borderRadius: 4, borderSkipped: false, datalabels: DL_OFF },
-        { label: 'Q2', data: q2bs, backgroundColor: '#61DD75', borderRadius: 4, borderSkipped: false, datalabels: DL_OFF }
-      ]
+      datasets: tris.map(q => ({
+        label: q.id,
+        // null quando o setor não existia no trimestre — a barra some em vez de
+        // aparecer como zero, que leria como "entregou nada".
+        data: allSects.map(sec => {
+          const v = q.linhas.filter(d => d.setor === sec).map(d => d.perc);
+          return v.length ? +avg(v).toFixed(2) : null;
+        }),
+        backgroundColor: q.cor, borderRadius: 4, borderSkipped: false, datalabels: DL_OFF
+      }))
     },
     options: {
       responsive: true, aspectRatio: 2, layout: { padding: { top: 8 } },
