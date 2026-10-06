@@ -191,6 +191,19 @@
   .modal-item-sector { color: #9a9a9a; font-size: 0.75rem; margin: 0 12px; }
   .modal-item-months { display: flex; gap: 6px; }
 
+  /* ─── Movimentação do mês ─── */
+  .mov-card { border:1px solid #2e2e2e; border-radius:12px; background:#161616;
+    padding:14px 18px; margin:0 0 20px; display:flex; align-items:center;
+    gap:18px; flex-wrap:wrap; border-left:3px solid #ecc94b; }
+  .mov-titulo { font-size:0.72rem; color:#9a9a9a; text-transform:uppercase;
+    letter-spacing:0.06em; margin-right:4px; }
+  .mov-grupo { display:flex; align-items:center; gap:7px; font-size:0.82rem; color:#e2e8f0; }
+  .mov-num { font-weight:700; font-size:1.05rem; }
+  .mov-btn { margin-left:auto; background:transparent; border:1.5px solid #3a3a3a;
+    color:#9a9a9a; border-radius:20px; padding:5px 14px; font-size:0.75rem;
+    cursor:pointer; font-family:inherit; transition:all .15s; }
+  .mov-btn:hover { border-color:#61DD75; color:#61DD75; }
+
   /* ─── Boas-vindas ─── */
   .bv-bloco { border: 1px solid #2e2e2e; border-radius: 10px; padding: 14px 16px; margin-bottom: 10px; background: #1a1a1a; }
   .bv-bloco-topo { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
@@ -363,7 +376,7 @@
   <div class="sidebar-footer">
     <span id="sidebar-period">Dados: Jan – Jun 2026</span><br>
     <span id="sidebar-update">Última atualiz.: Jul 2026</span><br>
-    <span style="color:#3a3a3a;font-size:10px;letter-spacing:.5px">v1.12.1</span>
+    <span style="color:#3a3a3a;font-size:10px;letter-spacing:.5px">v1.13.0</span>
   </div>
 </aside>
 <div class="main-wrap">
@@ -426,6 +439,9 @@
   <!-- KPIs -->
   <div class="section-title">Visão Geral</div>
   <div class="kpis" id="kpis"></div>
+
+  <!-- Movimentação do mês — apenas Admin RH -->
+  <div id="movimentacao-wrap" class="nav-admin-only" style="display:none"></div>
 
   <!-- Charts row 1 -->
   <div class="section-title">Evolução &amp; Setores</div>
@@ -1896,6 +1912,7 @@ function render() {
   currentPage = 1;
   const data = getFiltered();
   buildKPIs(data);
+  renderMovimentacao();
   buildChartMonths();       // always uses raw
   buildChartSectors(data);
   buildChartTop10(data);
@@ -1978,6 +1995,36 @@ function openKpiModal(type) {
     document.getElementById('modalCount').textContent = contagem;
     document.getElementById('modalList').innerHTML = listHtml;
     document.getElementById('kpiModal').classList.add('open');
+  }
+
+  // ── Movimentação do mês: nomes de quem entrou e de quem ficou sem lançamento ─
+  if (type === 'movimentacao') {
+    const m = movimentacaoDoMes();
+    if (!m) return;
+    const linha = (p, cor, nota) => `<div class="modal-item">
+      <span class="modal-item-name">
+        <span class="bv-dot" style="display:inline-block;background:${sectorColor(p.setor)};margin-right:8px"></span>${p.nome}
+      </span>
+      <span class="modal-item-sector">${p.setor}</span>
+      <span class="modal-item-months"><span class="modal-chip" style="color:${cor};border-color:${cor}44">${nota(p)}</span></span>
+    </div>`;
+    const secao = (titulo, itens, cor, nota, explica) => itens.length
+      ? `<div style="font-size:0.72rem;color:#aaa;margin:14px 0 6px;text-transform:uppercase;letter-spacing:0.05em">${titulo} (${itens.length})</div>`
+        + (explica ? `<div style="font-size:0.72rem;color:#7a7a7a;margin-bottom:8px;line-height:1.5">${explica}</div>` : '')
+        + itens.map(p => linha(p, cor, nota)).join('')
+      : '';
+
+    const html =
+      secao('Novos na base', m.novos, '#61DD75', () => 'primeiro mês') +
+      secao('Retornaram', m.retornaram, '#38BDF8', () => `ausente em ${m.anterior}`) +
+      secao('Sem lançamento em ' + m.atual, m.ausentes, '#ecc94b',
+            p => `${p.meses} ${p.meses !== 1 ? 'meses' : 'mês'} na base`,
+            'O painel observa a ausência do registro — não sabe se é desligamento, férias, licença ou lançamento esquecido. Vale conferir na planilha.');
+
+    abrirModal('#ecc94b', '🔄 Movimentação ' + m.anterior + ' → ' + m.atual,
+      `${m.novos.length + m.retornaram.length} ${(m.novos.length + m.retornaram.length) !== 1 ? 'entraram' : 'entrou'} · ${m.ausentes.length} sem lançamento`,
+      html || '<p style="color:#61DD75;padding:16px">✓ Nenhuma mudança.</p>');
+    return;
   }
 
   // ── Top Performer: ranking dos elegíveis com o histórico mês a mês ──────────
@@ -2194,6 +2241,85 @@ function openKpiModal(type) {
 }
 function closeModal() {
   document.getElementById('kpiModal').classList.remove('open');
+}
+
+// ─── MOVIMENTAÇÃO DO MÊS ─────────────────────────────────────────────────────
+// Compara o mês mais recente com o anterior e aponta quem apareceu e quem
+// sumiu. O painel DETECTA em vez de depender de alguém declarar — é o que pega
+// o que não era intencional: uma pessoa que saiu da base sem ninguém notar, ou
+// um lançamento que ficou faltando.
+//
+// Linguagem proposital: "sem lançamento", nunca "saiu da empresa". O painel
+// observa ausência de registro; ele não sabe se foi desligamento, férias,
+// licença ou esquecimento. Afirmar desligamento a partir de uma célula vazia
+// seria o painel inventando um fato sobre a vida de alguém.
+//
+// Restrito a rh_admin: é uma ferramenta de conferência de base, não um informe
+// sobre movimentação de pessoal para circular pela empresa.
+function movimentacaoDoMes() {
+  if (MONTHS.length < 2) return null;
+  const atual = MONTHS[MONTHS.length - 1];
+  const anterior = MONTHS[MONTHS.length - 2];
+  const base = raw.filter(d => d.nome !== '__agg__' && !excluded.has(d.nome));
+
+  const porNome = {};
+  base.forEach(d => { (porNome[d.nome] = porNome[d.nome] || []).push(d); });
+  const nosMeses = m => new Set(base.filter(d => d.mes === m).map(d => d.nome));
+  const noAtual = nosMeses(atual), noAnterior = nosMeses(anterior);
+
+  const setorDe = n => {
+    const regs = porNome[n];
+    let u = regs[0];
+    regs.forEach(r => { if (MONTHS.indexOf(r.mes) >= MONTHS.indexOf(u.mes)) u = r; });
+    return u.setor;
+  };
+  const primeiroMesDe = n => porNome[n]
+    .map(r => MONTHS.indexOf(r.mes)).sort((a, b) => a - b)[0];
+
+  const idxAtual = MONTHS.indexOf(atual);
+  // Quem apareceu agora e não estava no mês anterior. Separa primeira aparição
+  // na base de quem já tinha histórico e voltou — são situações diferentes.
+  const chegaram = [...noAtual].filter(n => !noAnterior.has(n)).map(n => ({
+    nome: n, setor: setorDe(n), novo: primeiroMesDe(n) === idxAtual
+  }));
+  const ausentes = [...noAnterior].filter(n => !noAtual.has(n)).map(n => ({
+    nome: n, setor: setorDe(n), meses: porNome[n].length
+  }));
+
+  const ordena = (a, b) => a.nome.localeCompare(b.nome);
+  return {
+    atual, anterior,
+    novos: chegaram.filter(p => p.novo).sort(ordena),
+    retornaram: chegaram.filter(p => !p.novo).sort(ordena),
+    ausentes: ausentes.sort(ordena)
+  };
+}
+
+function renderMovimentacao() {
+  const wrap = document.getElementById('movimentacao-wrap');
+  if (!wrap) return;
+  const u = window.__YOURH_USER__ || {};
+  if (u.role !== 'rh_admin') { wrap.innerHTML = ''; return; }
+
+  const m = movimentacaoDoMes();
+  if (!m) { wrap.innerHTML = ''; return; }
+  const total = m.novos.length + m.retornaram.length + m.ausentes.length;
+  if (!total) {
+    wrap.innerHTML = `<div class="mov-card" style="border-left-color:#61DD75">
+      <span class="mov-titulo">Movimentação em ${m.atual}</span>
+      <span class="mov-grupo" style="color:#61DD75">Nenhuma mudança em relação a ${m.anterior}.</span>
+    </div>`;
+    return;
+  }
+  const grupo = (cor, n, rotulo) => n
+    ? `<span class="mov-grupo"><span class="mov-num" style="color:${cor}">${n}</span> ${rotulo}</span>` : '';
+  wrap.innerHTML = `<div class="mov-card">
+    <span class="mov-titulo">Movimentação ${m.anterior} → ${m.atual}</span>
+    ${grupo('#61DD75', m.novos.length, m.novos.length === 1 ? 'novo na base' : 'novos na base')}
+    ${grupo('#38BDF8', m.retornaram.length, m.retornaram.length === 1 ? 'retornou' : 'retornaram')}
+    ${grupo('#ecc94b', m.ausentes.length, 'sem lançamento')}
+    <button class="mov-btn" onclick="openKpiModal('movimentacao')">Ver nomes</button>
+  </div>`;
 }
 
 // ─── BOAS-VINDAS ─────────────────────────────────────────────────────────────
