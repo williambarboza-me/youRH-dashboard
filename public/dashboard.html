@@ -376,7 +376,7 @@
   <div class="sidebar-footer">
     <span id="sidebar-period">Dados: Jan – Jun 2026</span><br>
     <span id="sidebar-update">Última atualiz.: Jul 2026</span><br>
-    <span style="color:#3a3a3a;font-size:10px;letter-spacing:.5px">v1.13.0</span>
+    <span style="color:#3a3a3a;font-size:10px;letter-spacing:.5px">v1.13.1</span>
   </div>
 </aside>
 <div class="main-wrap">
@@ -740,6 +740,40 @@
 </div>
 
 <script>
+// ─── DIAGNÓSTICO ─────────────────────────────────────────────────────────────
+// Um erro de JavaScript em qualquer ponto deste arquivo interrompe tudo o que
+// vem depois, e o sintoma para quem usa é mudo: a tela monta e os controles
+// param de responder, sem nenhuma pista. Isso tornava impossível descobrir o
+// problema à distância — a pessoa só conseguia dizer "não está funcionando".
+// A faixa abaixo transforma uma falha silenciosa em algo que pode ser lido e
+// relatado, com a mensagem e a linha exata.
+function avisarFalha(texto, detalhe) {
+  try {
+    let box = document.getElementById('aviso-falha');
+    if (!box) {
+      box = document.createElement('div');
+      box.id = 'aviso-falha';
+      box.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:9999;'
+        + 'background:#2a1f0a;border-bottom:2px solid #ecc94b;color:#f0d98c;'
+        + 'padding:12px 20px;font-family:inherit;font-size:0.82rem;line-height:1.5;'
+        + 'display:flex;align-items:flex-start;gap:12px;';
+      (document.body || document.documentElement).appendChild(box);
+    }
+    box.innerHTML = '<span style="font-size:1rem;flex-shrink:0">⚠️</span>'
+      + '<span style="flex:1">' + texto
+      + (detalhe ? '<br><code style="font-size:0.72rem;color:#b5a06a">' + detalhe + '</code>' : '')
+      + '</span>'
+      + '<button onclick="this.parentNode.remove()" style="background:none;border:none;'
+      + 'color:#b5a06a;cursor:pointer;font-size:1rem;flex-shrink:0;font-family:inherit">✕</button>';
+  } catch (e) { /* nunca deixar o próprio aviso quebrar a página */ }
+}
+
+window.addEventListener('error', function(ev) {
+  avisarFalha('Algo falhou ao carregar o painel e parte dos controles pode não '
+    + 'responder. Tire um print desta mensagem e envie para o suporte.',
+    (ev.message || 'erro') + ' — linha ' + (ev.lineno || '?'));
+});
+
 // ─── DATA ─────────────────────────────────────────────── build:2026-09-09d ──
 const raw = (window.__YOURH_DATA__ || []);
 
@@ -1013,7 +1047,42 @@ function destroyChart(c) { if(c) c.destroy(); }
 
 const gridColor = '#1c1c1c';
 const tickColor = '#9a9a9a';
-Chart.register(ChartDataLabels);
+// ─── RESILIÊNCIA A FALHA DE BIBLIOTECA EXTERNA ───────────────────────────────
+// Chart.js e o plugin de rótulos vêm de cdnjs.cloudflare.com. Em rede
+// corporativa, com antivírus ou extensão de bloqueio, esse domínio pode não
+// carregar — e `Chart` fica indefinido.
+//
+// Antes, isto derrubava o script INTEIRO nesta linha. Tudo que vem depois
+// nunca era executado, inclusive os listeners dos filtros, registrados ~900
+// linhas abaixo. O resultado para quem usava: a página montava normalmente
+// (HTML e CSS não dependem de JS), os filtros apareciam na tela e simplesmente
+// não respondiam a nada — sem nenhuma mensagem dizendo o porquê.
+//
+// Agora o painel degrada em vez de morrer: perde os gráficos e mantém filtros,
+// KPIs, tabela, ranking e popups funcionando, com um aviso explicando o que
+// faltou carregar.
+(function() {
+  const temChart  = typeof Chart !== 'undefined';
+  const temLabels = typeof ChartDataLabels !== 'undefined';
+
+  if (temChart && temLabels) { Chart.register(ChartDataLabels); return; }
+
+  if (!temChart) {
+    // Stub inerte: `new Chart(...)` passa a devolver um objeto com a mesma
+    // superfície que o resto do código usa, em vez de lançar erro.
+    window.Chart = function() {
+      return { destroy() {}, update() {}, setDatasetVisibility() {},
+               data: { datasets: [] }, options: {} };
+    };
+    window.Chart.register = function() {};
+  }
+  if (!temLabels) window.ChartDataLabels = {};
+
+  avisarFalha('Os gráficos não carregaram porque a biblioteca externa '
+    + '(cdnjs.cloudflare.com) foi bloqueada nesta rede ou navegador. '
+    + 'Os filtros, a tabela e os indicadores continuam funcionando normalmente. '
+    + 'Se precisar dos gráficos, peça ao TI para liberar esse endereço.');
+})();
 
 // ─── CLASSIFICAÇÃO POR PESSOA ────────────────────────────────────────────────
 // Fonte única de verdade para "quantas pessoas estão acima/abaixo". Cada pessoa

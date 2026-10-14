@@ -443,6 +443,12 @@ app.get('/', requireAuth, async (req, res) => {
   window.__YOURH_DATA__ = ${JSON.stringify(filtered)};
 </script>`;
     html = html.replace('</head>', injection + '\n</head>');
+    // Esta página carrega os dados da planilha embutidos no próprio HTML, então
+    // uma cópia em cache serve dados velhos sem nenhum sinal de que são velhos.
+    // Sem este header, o navegador aplica cache heurístico e o comportamento
+    // varia de navegador para navegador — o que faz a mesma versão do painel
+    // parecer diferente em máquinas diferentes.
+    res.set('Cache-Control', 'no-store, must-revalidate');
     res.send(html);
   } catch (err) {
     console.error('Erro ao montar dashboard:', err.message);
