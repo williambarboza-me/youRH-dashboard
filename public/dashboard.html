@@ -376,7 +376,7 @@
   <div class="sidebar-footer">
     <span id="sidebar-period">Dados: Jan – Jun 2026</span><br>
     <span id="sidebar-update">Última atualiz.: Jul 2026</span><br>
-    <span style="color:#3a3a3a;font-size:10px;letter-spacing:.5px">v1.13.1</span>
+    <span style="color:#3a3a3a;font-size:10px;letter-spacing:.5px">v1.13.2</span>
   </div>
 </aside>
 <div class="main-wrap">
@@ -824,6 +824,23 @@ raw.forEach(d => {
   const semAcento = t => (t || '').toLowerCase().trim().normalize('NFD')
     .split('').filter(c => { const n = c.charCodeAt(0); return n < 0x0300 || n > 0x036F; })
     .join('').replace(/\s+/g, ' ');
+
+  // ── Caso 0: fusões DECLARADAS ──
+  // Para quando duas grafias são a mesma pessoa mas não há nada no dado que
+  // permita deduzir isso: "João Marcelo" e "João Varaschin" só têm o primeiro
+  // nome em comum, e os sobrenomes são diferentes. As regras 1 e 2 abaixo são
+  // heurísticas sobre a escrita do nome; este caso não tem heurística possível
+  // e depende de alguém que conhece as pessoas dizer. Enquanto a planilha não
+  // tiver uma chave estável (e-mail), cada caso assim precisa entrar aqui.
+  //
+  // Formato: 'grafia que some': 'grafia que fica'
+  const FUSOES_DECLARADAS = {
+    'João Marcelo': 'João Varaschin',
+  };
+  raw.forEach(d => {
+    const destino = FUSOES_DECLARADAS[(d.nome || '').trim()];
+    if (destino) d.nome = destino;
+  });
 
   // ── Caso 1: só o primeiro nome em alguns meses, nome completo em outros ──
   const primeiroParaCompleto = {};
