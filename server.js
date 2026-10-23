@@ -431,6 +431,20 @@ app.delete('/api/admin/users/:email', requireAuthAPI, requireAdmin, async (req, 
 // ─── DASHBOARD (server-side injection) ───────────────────────────────────────
 const DASHBOARD_HTML = path.join(__dirname, 'public', 'dashboard.html');
 
+// Versão publicada, lida do próprio painel para não existirem duas fontes de
+// verdade. Endpoint público e mínimo: devolve só a versão, para conferir se um
+// deploy entrou no ar sem precisar fazer login. Nenhum dado de pessoa é exposto.
+let APP_VERSION = 'desconhecida';
+try {
+  const mv = fs.readFileSync(DASHBOARD_HTML, 'utf-8').match(/>v(\d+\.\d+\.\d+)</);
+  if (mv) APP_VERSION = mv[1];
+} catch (e) { /* mantém 'desconhecida' */ }
+
+app.get('/version', (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.json({ version: APP_VERSION });
+});
+
 app.get('/', requireAuth, async (req, res) => {
   try {
     const all      = await getRawData();

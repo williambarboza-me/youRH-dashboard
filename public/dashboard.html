@@ -348,7 +348,7 @@
 <aside class="sidebar" id="sidebar">
   <div class="sidebar-brand">
     <div class="sidebar-logo">&#9679; YouRH</div>
-    <div class="sidebar-sub">Performance<br>Jan – Jun 2026</div>
+    <div class="sidebar-sub">Performance<br><span id="sidebar-sub-period">—</span></div>
   </div>
   <nav class="sidebar-nav">
     <div class="nav-item active" data-sec="geral" onclick="showSection('geral')">
@@ -376,7 +376,7 @@
   <div class="sidebar-footer">
     <span id="sidebar-period">Dados: Jan – Jun 2026</span><br>
     <span id="sidebar-update">Última atualiz.: Jul 2026</span><br>
-    <span style="color:#3a3a3a;font-size:10px;letter-spacing:.5px">v1.13.2</span>
+    <span style="color:#3a3a3a;font-size:10px;letter-spacing:.5px">v1.13.3</span>
   </div>
 </aside>
 <div class="main-wrap">
@@ -919,6 +919,10 @@ const MONTHS = MONTHS_ORDER.filter(m => raw.some(d => d.mes === m));
   if (sp) sp.textContent = 'Dados: ' + abbr(first) + ' – ' + abbr(last) + ' 2026';
   const su = document.getElementById('sidebar-update');
   if (su) su.textContent = 'Última atualiz.: ' + abbr(last) + ' 2026';
+  // Este rótulo da barra lateral era fixo no HTML e dizia 'Jan – Jun 2026'
+  // mesmo com a base já em Setembro, contradizendo o cabeçalho na mesma tela.
+  const ssp = document.getElementById('sidebar-sub-period');
+  if (ssp) ssp.textContent = abbr(first) + ' – ' + abbr(last) + ' 2026';
 })();
 
 // Popula meses individuais no filtro dinamicamente
